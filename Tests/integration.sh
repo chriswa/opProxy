@@ -59,7 +59,8 @@ DAEMON_PID=
 start_daemon() { # decision [delay]
   stop_daemon
   OPPROXY_NO_AUTO_AUTH=${OPPROXY_NO_AUTO_AUTH-1} OPPROXY_NO_MENU_BAR=1 OPPROXY_POLL_SECONDS=1 OPPROXY_TERMINAL_IDLE=${OPPROXY_TERMINAL_IDLE:-600} OPPROXY_TEST_APPROVER=$1 OPPROXY_TEST_DELAY=${2:-0} \
-    OPPROXY_OP_REQUIREMENT=${OP_REQUIREMENT-none} "$DAEMON_BIN" daemon & DAEMON_PID=$!
+    OPPROXY_OP_REQUIREMENT=${OP_REQUIREMENT-none} OPPROXY_TEST_SWAP_OP=${OPPROXY_TEST_SWAP_OP:-} \
+    "$DAEMON_BIN" daemon & DAEMON_PID=$!
   for _ in $(seq 50); do [ -S "$OPPROXY_HOME/daemon.sock" ] && return; sleep 0.1; done
   echo "daemon did not start"; exit 1
 }
@@ -286,6 +287,23 @@ runs=$(wc -l < "$WORK/stub-runs")
 err=$(agent "$OP" read op://a/b/c 2>&1); rc=$?
 check "unsigned op: refused" grep -q "no 1Password-signed op" <<<"$err"
 check "unsigned op: never ran" [ "$(wc -l < "$WORK/stub-runs")" = "$runs" ]
+start_daemon approved
+
+# --- op runs only if the kernel loaded the exact binary that passed the signature check.
+# /bin/echo (Apple-signed) stands in for op; the swap knob launches /bin/ls instead, as if it
+# replaced the file between the check and exec.
+SAVED_OP=$OPPROXY_REAL_OP
+export OPPROXY_REAL_OP=/bin/echo
+OP_REQUIREMENT="anchor apple" start_daemon approved
+out=$(agent "$OP" read op://signed/x/y 2>&1)
+check "signed op: runs after the loaded-code check" [ "$out" = "read op://signed/x/y" ]
+stop_daemon
+OPPROXY_TEST_SWAP_OP=/bin/ls OP_REQUIREMENT="anchor apple" start_daemon approved
+out=$(agent "$OP" read op://signed/x/y 2>&1); rc=$?
+check "swapped op: refused" grep -q "changed between its 1Password signature check and launch" <<<"$out"
+check "swapped op: nothing ran" [ $rc = 1 ]
+stop_daemon
+export OPPROXY_REAL_OP=$SAVED_OP
 start_daemon approved
 
 # --- the holder must be the daemon's own build

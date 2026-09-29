@@ -42,9 +42,16 @@ public enum CodeSignature {
     /// The code directory hash the kernel recorded when this process was exec'd. Asking the
     /// Security framework instead would re-read the file at our path, which may have been
     /// replaced since.
-    public static func cdhashOfSelf() -> Data? {
+    public static func cdhashOfSelf() -> Data? { cdhash(pid: getpid()) }
+
+    /// The code directory hash of what the kernel actually loaded into `pid`, provided its
+    /// signature is still valid (CS_VALID). Nil for invalid or unsigned code.
+    public static func cdhash(pid: pid_t) -> Data? {
+        var status: UInt32 = 0
+        guard csops(pid, 0 /* CS_OPS_STATUS */, &status, MemoryLayout<UInt32>.size) == 0,
+              status & 0x1 /* CS_VALID */ != 0 else { return nil }
         var hash = [UInt8](repeating: 0, count: 20)
-        guard csops(getpid(), 5 /* CS_OPS_CDHASH */, &hash, hash.count) == 0 else { return nil }
+        guard csops(pid, 5 /* CS_OPS_CDHASH */, &hash, hash.count) == 0 else { return nil }
         return Data(hash)
     }
 
@@ -57,21 +64,25 @@ public enum CodeSignature {
 }
 
 /// Re-verifies a file's signature only when its identity on disk changes; a replaced or
-/// rewritten file changes inode, size, mtime or ctime.
+/// rewritten file changes inode, size, mtime or ctime. The file can still be swapped between
+/// this check and exec, so callers must also compare the returned code hash with the running
+/// process's (`CodeSignature.cdhash(pid:)`).
 public final class VerifiedFile {
     public let requirement: String
     private let lock = NSLock()
-    private var verified: [String: FileStamp] = [:]
+    private var verified: [String: (stamp: FileStamp, cdhash: Data)] = [:]
 
     public init(requirement: String) { self.requirement = requirement }
 
-    public func check(_ path: String) -> Bool {
+    /// The code hash of the file at `path` if it meets the requirement.
+    public func check(_ path: String) -> Data? {
         let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-        guard let stamp = FileStamp(resolved) else { return false }
-        if lock.withLock({ verified[resolved] == stamp }) { return true }
-        guard CodeSignature.file(resolved, satisfies: requirement) else { return false }
-        lock.withLock { verified[resolved] = stamp }
-        return true
+        guard let stamp = FileStamp(resolved) else { return nil }
+        if let hit = lock.withLock({ verified[resolved] }), hit.stamp == stamp { return hit.cdhash }
+        guard CodeSignature.file(resolved, satisfies: requirement),
+              let cdhash = CodeSignature.cdhash(file: resolved) else { return nil }
+        lock.withLock { verified[resolved] = (stamp, cdhash) }
+        return cdhash
     }
 }
 

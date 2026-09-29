@@ -151,22 +151,44 @@ struct LocalOp {
     }
 
     func run(_ argv: [String], extraEnv: [String: String], timeout: TimeInterval) -> ProxyResponse {
-        guard let path = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) && (verifier?.check($0) ?? true) }) else {
+        var path: String?
+        var expected: Data?
+        for candidate in candidates where FileManager.default.isExecutableFile(atPath: candidate) {
+            if let verifier {
+                guard let hash = verifier.check(candidate) else { continue }
+                // Spawn the resolved file itself: the symlink is just one more thing to swap.
+                (path, expected) = (URL(fileURLWithPath: candidate).resolvingSymlinksInPath().path, hash)
+            } else {
+                path = candidate
+            }
+            break
+        }
+        guard var path else {
             return .failure("no 1Password-signed op at \(candidates.joined(separator: " or ")); refusing to run it")
         }
+        #if OPPROXY_TESTING
+        // Simulates losing the race: a different binary is at the path by the time it's exec'd.
+        if let swapped = TestKnobs.value("OPPROXY_TEST_SWAP_OP") { path = swapped }
+        #endif
         // A minimal environment: nothing inherited from launchd or the plist reaches op.
         let inherited = ProcessInfo.processInfo.environment
         var env = ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
         for key in ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG"] { env[key] = inherited[key] }
         env.merge(ProxyRequest.forwardedEnvironment(extraEnv)) { $1 }
-        return Self.spawn(path, argv: argv, env: env, timeout: timeout)
+        return Self.spawn(path, argv: argv, env: env, timeout: timeout, expectedCDHash: expected)
     }
 
     /// Runs `op` as a child in this process's Unix session, which is what carries 1Password's
     /// authorization. macOS charges `op`'s reads of 1Password's group container to opProxy
     /// (one "access data from other apps" prompt per daemon start). Disclaiming
     /// responsibility instead makes every `op` process ask separately, so don't.
-    static func spawn(_ path: String, argv: [String], env: [String: String], timeout: TimeInterval) -> ProxyResponse {
+    ///
+    /// With `expectedCDHash`, `op` starts suspended and only runs if the kernel loaded exactly
+    /// the binary whose signature was checked. Checking the file and then exec'ing its path
+    /// leaves a window where a same-user attacker can swap it, and whatever runs here runs
+    /// inside the authorized 1Password session.
+    static func spawn(_ path: String, argv: [String], env: [String: String], timeout: TimeInterval,
+                      expectedCDHash: Data?) -> ProxyResponse {
         var outPipe: [Int32] = [0, 0], errPipe: [Int32] = [0, 0]
         guard pipe(&outPipe) == 0, pipe(&errPipe) == 0 else { return .failure("could not create pipes") }
         var actions: posix_spawn_file_actions_t?
@@ -178,7 +200,8 @@ struct LocalOp {
         var attr: posix_spawnattr_t?
         posix_spawnattr_init(&attr)
         defer { posix_spawnattr_destroy(&attr) }
-        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT))
+        let suspended = expectedCDHash != nil ? Int16(POSIX_SPAWN_START_SUSPENDED) : 0
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT) | suspended)
 
         let cArgs: [UnsafeMutablePointer<CChar>?] = ([path] + argv).map { strdup($0) } + [nil]
         let cEnv: [UnsafeMutablePointer<CChar>?] = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
@@ -190,6 +213,16 @@ struct LocalOp {
         guard rc == 0 else {
             close(outPipe[0]); close(errPipe[0])
             return .failure("could not run \(path): \(String(cString: strerror(rc)))")
+        }
+        if let expectedCDHash {
+            guard CodeSignature.cdhash(pid: pid) == expectedCDHash else {
+                kill(pid, SIGKILL)
+                var status: Int32 = 0
+                while waitpid(pid, &status, 0) < 0, errno == EINTR {}
+                close(outPipe[0]); close(errPipe[0])
+                return .failure("\(path) changed between its 1Password signature check and launch; refusing to run it")
+            }
+            kill(pid, SIGCONT)
         }
         // Drain both pipes concurrently so a full stderr pipe can't block stdout.
         var stdout = Data(), stderr = Data()
