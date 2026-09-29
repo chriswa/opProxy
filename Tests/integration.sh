@@ -1,0 +1,327 @@
+#!/bin/bash
+# End-to-end test of shim + daemon against a stub `op`, with a scripted approver and a fake
+# agent process. No 1Password or Touch ID involved. Needs a debug build, which is the only
+# kind that honours the OPPROXY_* test knobs.
+set -uo pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+BIN="$ROOT/.build/debug/opProxy"
+[ -x "$BIN" ] || { echo "build first: swift build (after ./install.sh, or with a placeholder ApprovalKeyPin.swift)"; exit 1; }
+
+# Unix socket paths are capped at 104 bytes, so keep the state dir short.
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/opp.XXXXXX")
+export OPPROXY_HOME="$WORK/state"
+export OPPROXY_REAL_OP="$WORK/real-op"
+mkdir -p "$WORK/bin" "$OPPROXY_HOME"
+ln -s "$BIN" "$WORK/bin/op"
+OP="$WORK/bin/op"
+LOG="$OPPROXY_HOME/daemon.log"
+# The daemon runs from a copy so a test can swap the file under it.
+DAEMON_BIN="$WORK/opProxy"
+cp "$BIN" "$DAEMON_BIN"
+
+# A stand-in agent: debug builds treat argv[0] "opproxy-fake-agent" as a genuine Claude
+# process whose instance is argv[2]. Like Claude, it runs each command in a child shell
+# with the session ID in its environment.
+FAKE="$WORK/fake-agent"
+cat > "$FAKE" <<'AGENT'
+export CLAUDE_CODE_SESSION_ID=$2
+shift 2
+/bin/bash -c '"$@"' tool-shell "$@"
+AGENT
+
+cat > "$OPPROXY_REAL_OP" <<STUB
+#!/bin/bash
+# Stands in for op. "Authorization" is the file \$AUTH: any command but whoami creates it
+# (as a real prompt would), whoami succeeds only while it exists. Prints its grandparent
+# (the daemon, via the session holder) so tests can tell a daemon run from a passthrough.
+AUTH="$WORK/authorized"
+echo run >> "$WORK/stub-runs"
+case "\$*" in
+  *fail*) echo "stub failure" >&2; exit 7 ;;
+  whoami) [ -e "\$AUTH" ] && { echo "stub whoami"; exit 0; }; echo "not signed in" >&2; exit 1 ;;
+  "vault list --format json") [ -e "$WORK/refuse-auth" ] && { echo "authorization dismissed" >&2; exit 1; } ;;
+  *sid*) python3 -c 'import os; print(os.getsid(0))'; exit 0 ;;
+  "item get abcdefghijklmnopqrstuvwxyz --format json --vault zyxwvutsrqponmlkjihgfedcba")
+    echo '{"title": "Stub Item Title", "vault": {"name": "Stub Vault"}}'; exit 0 ;;
+esac
+touch "\$AUTH"
+echo "stub gp=\$(ps -o ppid= -p \$PPID | tr -d ' ') args=\$* account=\${OP_ACCOUNT:-}"
+STUB
+chmod +x "$OPPROXY_REAL_OP"
+
+PASS=0; FAIL=0
+check() { # name, condition...
+  local name=$1; shift
+  if "$@"; then PASS=$((PASS+1)); echo "ok   $name"; else FAIL=$((FAIL+1)); echo "FAIL $name:" "$@"; fi
+}
+count() { grep -c -- "$1" "$LOG" 2>/dev/null || true; }
+DAEMON_PID=
+start_daemon() { # decision [delay]
+  stop_daemon
+  OPPROXY_NO_AUTO_AUTH=${OPPROXY_NO_AUTO_AUTH-1} OPPROXY_NO_MENU_BAR=1 OPPROXY_POLL_SECONDS=1 OPPROXY_TERMINAL_IDLE=${OPPROXY_TERMINAL_IDLE:-600} OPPROXY_TEST_APPROVER=$1 OPPROXY_TEST_DELAY=${2:-0} \
+    OPPROXY_OP_REQUIREMENT=${OP_REQUIREMENT-none} "$DAEMON_BIN" daemon & DAEMON_PID=$!
+  for _ in $(seq 50); do [ -S "$OPPROXY_HOME/daemon.sock" ] && return; sleep 0.1; done
+  echo "daemon did not start"; exit 1
+}
+stop_daemon() {
+  [ -n "$DAEMON_PID" ] && kill "$DAEMON_PID" 2>/dev/null && wait "$DAEMON_PID" 2>/dev/null
+  DAEMON_PID=; rm -f "$OPPROXY_HOME/daemon.sock"
+}
+trap 'stop_daemon; rm -rf "$WORK"' EXIT
+# SID picks the session; INST the agent process instance (default: one per session).
+agent() { (exec -a opproxy-fake-agent /bin/bash "$FAKE" "${INST:-${SID:-sess-A}}" "${SID:-sess-A}" "$@"); }
+via_daemon() { [[ "$1" == "stub gp=$DAEMON_PID "* ]]; }
+not_daemon() { [[ "$1" == "stub gp="* ]] && ! via_daemon "$1"; }
+sid_of() { python3 -c "import os,sys; print(os.getsid(int(sys.argv[1])))" "$1"; }
+status() { "$BIN" status 2>&1; }
+not_in() { ! grep -q -- "$1" "$2" 2>/dev/null; }
+
+# --- no agent session: exec the real op directly
+out=$(env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_SESSION_ID -u CODEX_THREAD_ID -u CURSOR_CONVERSATION_ID "$OP" read op://a/b/c)
+check "no session: passthrough" not_daemon "$out"
+
+# --- daemon down: agent calls still work via passthrough
+out=$(agent "$OP" read op://a/b/c)
+check "daemon down: passthrough" not_daemon "$out"
+
+start_daemon approved
+# --- a session ID in the environment alone proves nothing. Run it orphaned to launchd, so no
+# agent is above it even when this suite itself runs inside one.
+orphaned() {
+  python3 - "$WORK/orphan.out" "$@" <<'PY'
+import os, subprocess, sys, time
+out = sys.argv[1]
+if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        with open(out + ".tmp", "w") as f: subprocess.run(sys.argv[2:], stdout=f, stderr=f)
+        os.rename(out + ".tmp", out); os._exit(0)
+    os._exit(0)
+while not os.path.exists(out): time.sleep(0.05)
+print(open(out).read(), end=""); os.remove(out)
+PY
+}
+# With no genuine agent above it, a caller is a terminal tab: one approval covers every read
+# from that Unix session, whatever session ID it claims.
+out=$(orphaned /bin/bash -c "CLAUDE_CODE_SESSION_ID=sess-A $OP read op://t/one/f; $OP read op://t/two/f")
+check "terminal: proxied" [ "$(grep -c "stub gp=$DAEMON_PID " <<<"$out")" = 2 ]
+check "terminal: one dialog for the tab" [ "$(count 'prompting: terminal:')" = 1 ]
+check "terminal: second read allowed" grep -q "allowed: terminal:[0-9]* op read op://t/two/f" "$LOG"
+check "terminal: dialog shows the process chain" grep -q '"chain":\[.*read op:\\/\\/t\\/one\\/f' "$LOG"
+orphaned "$OP" read op://t/three/f >/dev/null
+check "terminal: another tab prompts again" [ "$(count 'prompting: terminal:')" = 2 ]
+orphaned "$OP" vault list >/dev/null
+check "terminal: listings need no dialog" [ "$(count 'prompting: terminal:')" = 2 ]
+
+# --- an agent that strips its session variables is still an agent
+agent env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_SESSION_ID "$OP" read op://strip/x/y >/dev/null
+check "agent without session env: agent rules" grep -q "prompting: claude:unknown op read op://strip/x/y" "$LOG"
+
+
+out=$(agent "$OP" read op://a/b/c)
+check "approved: runs under the daemon" [ "$out" = "stub gp=$DAEMON_PID args=read op://a/b/c account=" ]
+check "approved: prompted once" [ "$(count 'prompting: claude:sess-A op read op://a/b/c')" = 1 ]
+out=$(agent "$OP" read op://a/b/c)
+check "repeat: no second prompt" [ "$(count 'prompting: claude:sess-A op read op://a/b/c')" = 1 ]
+check "repeat: allowed from allowlist" [ "$(count 'allowed: claude:sess-A op read op://a/b/c')" = 1 ]
+check "repeat: still returns output" via_daemon "$out"
+
+SID=sess-B agent "$OP" read op://a/b/c >/dev/null
+check "other session: prompts again" [ "$(count 'prompting: claude:sess-B')" = 1 ]
+agent "$OP" read op://a/b/c -n >/dev/null
+check "different argv: prompts again" [ "$(count 'prompting: claude:sess-A op read op://a/b/c -n')" = 1 ]
+out=$(agent env OP_ACCOUNT=acme "$OP" read op://a/b/c)
+check "OP_ACCOUNT forwarded" [ "$out" = "stub gp=$DAEMON_PID args=read op://a/b/c account=acme" ]
+check "OP_ACCOUNT is part of the key" [ "$(count 'prompting: claude:sess-A op read op://a/b/c$')" = 2 ]
+
+out=$(agent "$OP" whoami)
+check "whoami: proxied without a prompt" [ "$out" = "stub whoami" ] 
+check "whoami: no prompt logged" [ "$(count 'prompting: claude:sess-A op whoami')" = 0 ]
+
+out=$(agent "$OP" item create --title x 'password=hunter2')
+check "writes pass through" not_daemon "$out"
+check "passthrough argv never logged" [ "$(count hunter2)" = 0 ]
+
+
+# --- --out-file is written by the shim in the caller's cwd
+mkdir -p "$WORK/cwd" && cd "$WORK/cwd"
+out=$(agent "$OP" read op://Shared/api/env -o .env --force)
+check "out-file: prints absolute path" [ "$out" = "$(pwd -P)/.env" ]
+check "out-file: contents from daemon" grep -q "args=read op://Shared/api/env account=" .env
+check "out-file: mode 0600" [ "$(stat -f %Lp .env)" = 600 ]
+err=$(agent "$OP" read op://Shared/api/env -o .env 2>&1); rc=$?
+check "out-file: refuses overwrite without --force" [ $rc = 1 ]
+cd - >/dev/null
+
+# --- tool command recovered from the process tree
+agent /bin/zsh -c "X=\$($OP read op://ctx/item/field) && echo done" >/dev/null
+check "dialog shows the agent's shell command" grep -qF '"toolCommand":"X=$('"${OP//\//\\/}"' read op:\/\/ctx\/item\/field) && echo done","via":null' "$LOG"
+check "dialog headlines the item" grep -q '"subject":"item"' "$LOG"
+check "dialog shows vault/field" grep -q '"details":\["Vault=ctx","Field=field"\]' "$LOG"
+
+# --- concurrent identical requests share one dialog
+start_daemon approved 1
+pids=()
+for i in 1 2 3 4 5; do SID=sess-C agent "$OP" read op://p/q/r > "$WORK/par$i" & pids+=($!); done
+wait "${pids[@]}"
+check "concurrent: one prompt for five calls" [ "$(count 'prompting: claude:sess-C')" = 1 ]
+check "concurrent: all five got output" [ "$(cat "$WORK"/par* | grep -c 'args=read op://p/q/r')" = 5 ]
+
+# --- an agent that gives up mid-dialog: the reply to its closed socket mustn't kill the
+# daemon (SIGPIPE), and the approval still counts for its retry
+SID=sess-G agent "$OP" read op://gone/x/y >/dev/null 2>&1 &
+sleep 0.5; pkill -f "read op://gone/x/y"; sleep 2
+check "requester left: noticed" grep -q "requester stopped waiting: claude:sess-G" "$LOG"
+check "requester left: daemon survives replying" kill -0 "$DAEMON_PID"
+out=$(SID=sess-G agent "$OP" read op://gone/x/y)
+check "requester left: retry runs on the approval" via_daemon "$out"
+check "requester left: retry needed no dialog" [ "$(count 'prompting: claude:sess-G')" = 1 ]
+
+# --- terminal approvals lapse after the idle window (1s here)
+OPPROXY_TERMINAL_IDLE=1 start_daemon approved
+orphaned /bin/bash -c "$OP read op://idle/x/y; $OP read op://idle/x/y; sleep 1.5; $OP read op://idle/x/y" >/dev/null
+check "terminal idle: second read in time, third after idle prompts" [ "$(count 'prompting: terminal:[0-9]* op read op://idle')" = 2 ]
+start_daemon approved 1
+
+# --- the dialog's duration choice
+start_daemon approved-once
+SID=sess-O agent "$OP" read op://once/x/y >/dev/null
+SID=sess-O agent "$OP" read op://once/x/y >/dev/null
+check "only this once: every call asks" [ "$(count 'prompting: claude:sess-O')" = 2 ]
+check "only this once: nothing stored" not_in "sess-O" "$OPPROXY_HOME/approvals.json"
+start_daemon approved-hour
+SID=sess-H agent "$OP" read op://hour/x/y >/dev/null
+SID=sess-H agent "$OP" read op://hour/x/y >/dev/null
+check "1 hour: second call silent" [ "$(count 'prompting: claude:sess-H')" = 1 ]
+ttl=$(python3 -c "
+import json, sys; from datetime import datetime
+for a in json.load(open(sys.argv[1])):
+    if a['key']['sessionId'] == 'sess-H':
+        f = lambda s: datetime.fromisoformat(s.replace('Z', '+00:00'))
+        print(int((f(a['expiresAt']) - f(a['approvedAt'])).total_seconds()))" "$OPPROXY_HOME/approvals.json")
+check "1 hour: stored with a signed 1-hour expiry" [ "$ttl" = 3600 ]
+start_daemon approved 1
+
+# --- approvals persist across daemon restarts
+out=$(agent "$OP" read op://a/b/c)
+check "restart: approval persisted" [ "$(count 'prompting: claude:sess-A op read op://a/b/c$')" = 2 ]
+
+# --- denial: error, nothing stored, next call prompts again
+start_daemon denied
+err=$(SID=sess-D agent "$OP" read op://d/e/f 2>&1 >/dev/null); rc=$?
+check "denied: exit 1" [ $rc = 1 ]
+check "denied: explains to the agent" grep -q "user denied" <<<"$err"
+SID=sess-D agent "$OP" read op://d/e/f >/dev/null 2>&1
+check "denied: not remembered" [ "$(count 'prompting: claude:sess-D')" = 2 ]
+
+# --- stub failures propagate
+start_daemon approved
+err=$(agent "$OP" read op://fail/x/y 2>&1); rc=$?
+check "real op exit code propagates" [ $rc = 7 ]
+check "real op stderr propagates" [ "$err" = "stub failure" ]
+
+# --- raw socket clients get the same routing, verification and approval as the shim
+cat > "$WORK/raw.py" <<'PY'
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])
+req = {"session": {"agent": "claude", "sessionId": "sess-RAW"}, "argv": json.loads(sys.argv[2]),
+       "env": {}, "cwd": "/", "requiresApproval": False, "daemonArgv": ["item", "delete", "x"]}
+s.sendall(json.dumps({"proxy": {"_0": req}}).encode() + b"\n")
+out = b""
+while chunk := s.recv(65536): out += chunk
+r = json.loads(out); print(r["exitCode"], r.get("passthrough")); print(__import__("base64").b64decode(r["stderr"]).decode(), end="")
+PY
+raw() { SID=sess-RAW agent python3 "$WORK/raw.py" "$OPPROXY_HOME/daemon.sock" "$1"; }
+out=$(raw '["item","delete","x","--vault","Private"]')
+check "raw socket: write command rejected" grep -q "only proxies read-only commands" <<<"$out"
+raw '["read","op://raw/item/field"]' >/dev/null
+check "raw socket: forged requiresApproval ignored" [ "$(count 'prompting: claude:sess-RAW op read op://raw/item/field')" = 1 ]
+
+# --- the session holder owns its own Unix session, which refresh replaces
+sid1=$(agent "$OP" read op://sid/x/y)
+check "holder: op runs outside the daemon's session" [ -n "$sid1" -a "$sid1" != "$(sid_of $DAEMON_PID)" ]
+check "status: authorized after a run" grep -q "1Password: authorized, 11h 59m left" <<<"$(status)"
+out=$("$BIN" refresh 2>&1); rc=$?
+check "refresh: succeeds" [ $rc = 0 ]
+sid2=$(agent "$OP" read op://sid/x/y)
+check "refresh: new Unix session" [ -n "$sid2" -a "$sid2" != "$sid1" ]
+check "refresh: logged" grep -q "refreshed: session helper $sid1 → $sid2" "$LOG"
+touch "$WORK/refuse-auth"
+out=$("$BIN" refresh 2>&1); rc=$?
+check "refresh declined: reports failure" [ $rc = 1 ]
+check "refresh declined: shows 1Password's error" grep -q "authorization dismissed" <<<"$out"
+check "refresh declined: keeps the old session" [ "$(agent "$OP" read op://sid/x/y)" = "$sid2" ]
+rm -f "$WORK/refuse-auth"
+rm -f "$WORK/authorized"; sleep 2.5
+check "poll: notices expiry" grep -q "1Password: not authorized" <<<"$(status)"
+check "poll: logs expiry" grep -q "1Password authorization ended" "$LOG"
+
+# --- opaque IDs are looked up so the dialog shows names
+SID=sess-N agent "$OP" read op://zyxwvutsrqponmlkjihgfedcba/abcdefghijklmnopqrstuvwxyz/password >/dev/null
+check "IDs: dialog shows the item's name" grep -q '"resolvedItem":"Stub Item Title"' "$LOG"
+check "IDs: dialog shows the vault's name" grep -q '"resolvedVault":"Stub Vault"' "$LOG"
+check "IDs: approval labelled by name" grep -q '"itemLabel" : "Stub Item Title"' "$OPPROXY_HOME/approvals.json"
+
+# --- approvals belong to the agent process, not whatever session ID a command claims
+SID=sess-B agent "$OP" read op://x/y/z >/dev/null
+INST=sess-A SID=sess-A agent env CLAUDE_CODE_SESSION_ID=sess-B "$OP" read op://x/y/z >/dev/null
+check "exec env session swap: prompts again" [ "$(count 'prompting: claude:sess-B op read op://x/y/z')" = 2 ]
+
+# --- forged or edited approvals.json entries don't verify
+python3 - "$OPPROXY_HOME/approvals.json" <<'PY'
+import json, sys
+entries = json.load(open(sys.argv[1]))
+forged = json.loads(json.dumps(entries[0]))
+forged["key"]["sessionId"] = "sess-E"; forged["key"]["agentInstance"] = "fake:sess-E"
+forged["key"]["argv"] = ["read", "op://forged/item/field"]
+json.dump(entries + [forged], open(sys.argv[1], "w"))
+PY
+check "forged approval: listed as invalid" grep -q "Ignoring 1 entry with invalid signatures" <<<"$("$BIN" list)"
+SID=sess-E agent "$OP" read op://forged/item/field >/dev/null
+check "forged approval: prompts" [ "$(count 'prompting: claude:sess-E op read op://forged/item/field')" = 1 ]
+
+# --- op must be 1Password's signed binary
+OP_REQUIREMENT= start_daemon approved
+runs=$(wc -l < "$WORK/stub-runs")
+err=$(agent "$OP" read op://a/b/c 2>&1); rc=$?
+check "unsigned op: refused" grep -q "no 1Password-signed op" <<<"$err"
+check "unsigned op: never ran" [ "$(wc -l < "$WORK/stub-runs")" = "$runs" ]
+start_daemon approved
+
+# --- the holder must be the daemon's own build
+agent "$OP" read op://a/b/c >/dev/null
+cp "$DAEMON_BIN" "$WORK/opProxy.orig"; rm "$DAEMON_BIN"; cp /bin/ls "$DAEMON_BIN"
+err=$("$BIN" refresh 2>&1); rc=$?
+check "swapped binary: refresh refused" grep -q "no longer matches the running daemon" <<<"$err"
+check "swapped binary: old session keeps working" via_daemon "$(agent "$OP" read op://a/b/c)"
+rm "$DAEMON_BIN"; mv "$WORK/opProxy.orig" "$DAEMON_BIN"
+
+# --- automatic authorization: at startup, again when it ends, but not after a decline
+rm -f "$WORK/authorized"
+OPPROXY_NO_AUTO_AUTH= start_daemon approved
+sleep 1.5
+check "auto-auth: at startup" [ "$(awk -v p="$DAEMON_PID" '/listening on/{n=0} /refreshed:/{n++} END{print n}' "$LOG")" -ge 1 ]
+check "auto-auth: authorized without any request" grep -q "1Password: authorized" <<<"$(status)"
+rm -f "$WORK/authorized"; sleep 2.5
+check "auto-auth: re-authorizes when it ends" grep -q "1Password: authorized" <<<"$(status)"
+touch "$WORK/refuse-auth"; rm -f "$WORK/authorized"; sleep 3.5
+declines=$(grep -c "refresh failed: authorization dismissed" "$LOG")
+sleep 3
+check "auto-auth: a decline isn't retried" [ "$(grep -c "refresh failed: authorization dismissed" "$LOG")" = "$declines" ]
+check "auto-auth: declined once" [ "$declines" -ge 1 ]
+rm -f "$WORK/refuse-auth"
+start_daemon approved
+
+# --- revoke is picked up by the running daemon
+"$BIN" revoke sess-A >/dev/null
+agent "$OP" read op://a/b/c >/dev/null
+check "revoke: running daemon prompts again" [ "$(count 'prompting: claude:sess-A op read op://a/b/c$')" = 3 ]
+
+# --- the Installed switch
+"$BIN" disable >/dev/null
+check "disabled: straight to the real op" not_daemon "$(agent "$OP" read op://a/b/c)"
+"$BIN" enable >/dev/null
+check "enabled again: proxied" via_daemon "$(agent "$OP" read op://a/b/c)"
+
+echo; echo "$PASS passed, $FAIL failed"
+[ $FAIL = 0 ]

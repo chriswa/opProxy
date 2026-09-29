@@ -1,0 +1,6 @@
+.build/
+# Created by install.sh: the app bundle and the op/opProxy links into it.
+bin/
+# Per-Mac Secure Enclave public key, written by install.sh.
+Sources/opProxy/ApprovalKeyPin.swift
+experiments/*.log

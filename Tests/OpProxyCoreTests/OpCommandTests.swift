@@ -1,0 +1,439 @@
+import XCTest
+@testable import OpProxyCore
+
+final class OpCommandTests: XCTestCase {
+    func plan(_ argv: [String]) -> ProxyPlan? {
+        if case .proxy(let plan) = OpCommand(argv: argv).routing { return plan }
+        return nil
+    }
+
+    func testCommonReadOnlyShapesAreProxied() {
+        let shapes: [[String]] = [
+            ["item", "get", "Issue Tracker API key", "--fields", "label=credential", "--reveal"],
+            ["item", "get", "CI token", "--vault", "Private", "--fields", "label=password", "--reveal"],
+            ["item", "get", "em5qippbdjh4jgmmhkidhxonka", "--format", "json"],
+            ["item", "get", "x", "--vault=Private", "--format=json", "--reveal"],
+            ["read", "op://Private/Deploy key/password"],
+            ["read", "-n", "op://Private/Build Bot GitHub App/add more/App ID"],
+            ["--account", "acme.1password.com", "read", "op://A/B/c"],
+        ]
+        for argv in shapes {
+            let p = plan(argv)
+            XCTAssertNotNil(p, "\(argv)")
+            XCTAssertEqual(p?.requiresApproval, true, "\(argv)")
+            XCTAssertEqual(p?.daemonArgv, argv)
+            XCTAssertNil(p?.outFile)
+        }
+    }
+
+    func testMetadataNeedsNoApproval() {
+        XCTAssertEqual(plan(["whoami"])?.requiresApproval, false)
+        XCTAssertEqual(plan(["whoami", "--account", "acme.1password.com"])?.requiresApproval, false)
+        XCTAssertEqual(plan(["account", "list"])?.requiresApproval, false)
+        XCTAssertEqual(plan(["vault", "list"])?.requiresApproval, false)
+        XCTAssertEqual(plan(["vault", "get", "Private"])?.requiresApproval, false)
+        XCTAssertEqual(plan(["item", "list", "--vault", "Private", "--format", "json"])?.requiresApproval, false)
+        XCTAssertEqual(plan(["item", "list", "--tags", "platform-service"])?.requiresApproval, false)
+        XCTAssertEqual(plan(["document", "list"])?.requiresApproval, false)
+        XCTAssertEqual(plan(["item", "get", "x", "--otp"])?.requiresApproval, true)
+        XCTAssertEqual(plan(["document", "get", "x"])?.requiresApproval, true)
+    }
+
+    func testWritesAndUnknownCommandsPassThrough() {
+        let shapes: [[String]] = [
+            ["--version"],
+            [],
+            ["item", "create", "--category", "API Credential", "credential[concealed]=sk-ant-x"],
+            ["item", "delete", "abc", "--vault", "Private", "--archive"],
+            ["item", "edit", "abc", "password=x"],
+            ["run", "--no-masking", "--", "/bin/echo", "ok"],
+            ["inject", "-i", "tpl"],
+            ["item", "share", "abc", "--expires-in", "1h"],
+            ["signin", "--raw"],
+            ["plugin", "run", "--", "gh", "auth", "status"],
+            ["signin"],
+            ["item", "get", "-", "--format", "json"],
+            ["item", "get", "x", "--help"],
+            ["read", "op://A/B/c", "--config", "/tmp/cfg"],
+            ["item", "get", "x", "--out-file", "f"],
+        ]
+        for argv in shapes {
+            XCTAssertNil(plan(argv), "\(argv) should pass through")
+        }
+    }
+
+    func testReadOutFileIsWrittenByShim() throws {
+        let p = try XCTUnwrap(plan(["read", "op://Shared/app-api/env", "-o", ".env", "--force"]))
+        XCTAssertEqual(p.daemonArgv, ["read", "op://Shared/app-api/env"])
+        XCTAssertEqual(p.outFile, OutFile(path: ".env", mode: 0o600, force: true))
+
+        let q = try XCTUnwrap(plan(["read", "--out-file=./key.pem", "--file-mode", "0644", "op://a/b/c"]))
+        XCTAssertEqual(q.daemonArgv, ["read", "op://a/b/c"])
+        XCTAssertEqual(q.outFile, OutFile(path: "./key.pem", mode: 0o644, force: false))
+    }
+
+    func testReadDescription() {
+        let d = OpCommand(argv: ["read", "op://Private/Build Bot GitHub App/add more/App ID"]).description
+        XCTAssertEqual(d.subject, "Build Bot GitHub App")
+        XCTAssertEqual(d.details.map(\.label), ["Vault", "Section", "Field"])
+        XCTAssertEqual(d.details.map(\.value), ["Private", "add more", "App ID"])
+        XCTAssertEqual(d.summary, "read Private/Build Bot GitHub App/App ID")
+
+        let otp = OpCommand(argv: ["read", "op://v/i/one-time password?attribute=otp"]).description
+        XCTAssertEqual(otp.details.last, .init(label: "Options", value: "attribute=otp"))
+    }
+
+    func testItemGetDescription() {
+        let d = OpCommand(argv: ["item", "get", "Chat webhook", "--vault", "private", "--reveal", "--fields", "credential"]).description
+        XCTAssertEqual(d.subject, "Chat webhook")
+        XCTAssertEqual(d.summary, "get “Chat webhook” in private (credential)")
+        XCTAssertTrue(d.details.contains(.init(label: "Reveals secrets", value: "yes", style: .warning)))
+        XCTAssertEqual(OpCommand.readableFields("label=A,label=B"), "A, B")
+        XCTAssertEqual(OpCommand.readableFields("type=otp"), "type otp")
+
+        let noVault = OpCommand(argv: ["item", "get", "em5qippbdjh4jgmmhkidhxonka", "--format", "json"]).description
+        XCTAssertTrue(noVault.details.contains(.init(label: "Vault", value: "any vault", style: .placeholder)))
+        XCTAssertTrue(noVault.details.contains(.init(label: "Fields", value: "all fields", style: .placeholder)))
+        XCTAssertTrue(noVault.details.contains(.init(label: "Reveals secrets", value: "no")))
+    }
+
+    func testLooksLikeID() {
+        XCTAssertTrue(OpCommand.looksLikeID("a8d2f6g1h9j4k7l3m5n0p2q6rs"))
+        XCTAssertFalse(OpCommand.looksLikeID("Issue Tracker API key"))
+        XCTAssertFalse(OpCommand.looksLikeID("Private"))
+    }
+
+    func testUnparseableReferenceFallsBackToRawCommand() {
+        let d = OpCommand(argv: ["read", "not-a-ref"]).description
+        XCTAssertEqual(d.summary, "run op read not-a-ref")
+    }
+}
+
+final class AgentSessionTests: XCTestCase {
+    func testDetectsEachAgent() {
+        XCTAssertEqual(AgentSession.detect(environment: ["CLAUDE_CODE_SESSION_ID": "c1", "SPACETERM_SURFACE_ID": "s1"]),
+                       AgentSession(agent: .claude, sessionId: "c1", surfaceId: "s1"))
+        XCTAssertEqual(AgentSession.detect(environment: ["CODEX_THREAD_ID": "x1"])?.agent, .codex)
+        XCTAssertEqual(AgentSession.detect(environment: ["CURSOR_CONVERSATION_ID": "u1", "CURSOR_AGENT": "1"])?.agent, .cursor)
+        XCTAssertNil(AgentSession.detect(environment: ["CLAUDE_CODE_SESSION_ID": ""]))
+        XCTAssertNil(AgentSession.detect(environment: ["TERM": "xterm"]))
+    }
+
+    func testNestedAgentsResolveToNearestProcess() {
+        let env = ["CLAUDE_CODE_SESSION_ID": "claude-outer", "CODEX_THREAD_ID": "codex-inner"]
+        let chain = [
+            ProcessEntry(pid: 5, ppid: 4, executable: "/bin/zsh", argv: ["/bin/zsh", "-lc", "op read op://a/b/c"]),
+            ProcessEntry(pid: 4, ppid: 3, executable: "/opt/homebrew/bin/codex", argv: ["codex", "exec"]),
+            ProcessEntry(pid: 3, ppid: 2, executable: "/bin/zsh", argv: ["/bin/zsh", "-c", "codex exec"]),
+            ProcessEntry(pid: 2, ppid: 1, executable: "/opt/homebrew/Caskroom/claude-code@latest/2.1.284/claude", argv: ["claude"]),
+        ]
+        XCTAssertEqual(AgentSession.detect(environment: env, ancestry: { chain })?.sessionId, "codex-inner")
+        XCTAssertEqual(AgentSession.detect(environment: env, ancestry: { Array(chain.dropFirst(2)) })?.sessionId,
+                       "claude-outer")
+        XCTAssertEqual(AgentSession.detect(environment: env)?.agent, .claude, "no tree: fixed order")
+
+        let cursorEnv = ["CLAUDE_CODE_SESSION_ID": "claude-outer", "CURSOR_CONVERSATION_ID": "cursor-inner"]
+        let cursorChain = [
+            ProcessEntry(pid: 4, ppid: 3, executable: "/Users/u/.local/share/cursor-agent/versions/1/node",
+                         argv: ["/Users/u/.local/bin/cursor-agent", "/Users/u/.local/share/cursor-agent/versions/1/index.js"]),
+            ProcessEntry(pid: 2, ppid: 1, executable: "/opt/claude", argv: ["claude"]),
+        ]
+        XCTAssertEqual(AgentSession.detect(environment: cursorEnv, ancestry: { cursorChain })?.sessionId, "cursor-inner")
+    }
+
+    func testSpacetermURLPrefersSurface() {
+        XCTAssertEqual(AgentSession(agent: .claude, sessionId: "c1", surfaceId: "s1").spacetermURL?.absoluteString,
+                       "spaceterm-surface://s1")
+        XCTAssertEqual(AgentSession(agent: .codex, sessionId: "x1", surfaceId: nil).spacetermURL?.absoluteString,
+                       "spaceterm-surface://x1")
+    }
+
+    func testEnvironmentForwarding() {
+        let env = ["OP_ACCOUNT": "a", "OP_FORMAT": "json", "OP_SESSION_x": "t", "PATH": "/bin"]
+        XCTAssertEqual(ProxyRequest.forwardedEnvironment(env), ["OP_ACCOUNT": "a", "OP_FORMAT": "json"])
+        XCTAssertTrue(ProxyRequest.bypassesDesktopApp(["OP_SERVICE_ACCOUNT_TOKEN": "t"]))
+        XCTAssertTrue(ProxyRequest.bypassesDesktopApp(["OP_SESSION_my": "t"]))
+        XCTAssertFalse(ProxyRequest.bypassesDesktopApp(["OP_ACCOUNT": "a"]))
+    }
+}
+
+final class ApprovalStoreTests: XCTestCase {
+    var url: URL!
+    override func setUp() {
+        url = FileManager.default.temporaryDirectory.appendingPathComponent("approvals-\(UUID()).json")
+    }
+    override func tearDown() { try? FileManager.default.removeItem(at: url) }
+
+    let key = ApprovalKey(agent: .claude, sessionId: "s", agentInstance: "10@1", argv: ["read", "op://a/b/c"], env: [:])
+    // Stand-in for the Secure Enclave signature: a keyed hash only the test knows.
+    static func fakeSign(_ d: Data) -> Data { Data((d + Data("secret".utf8)).reversed()) }
+    static let fakeVerify: (Data, Data) -> Bool = { fakeSign($0) == $1 }
+    func store(now: @escaping () -> Date = Date.init) -> ApprovalStore {
+        ApprovalStore(url: url, now: now, verify: Self.fakeVerify)
+    }
+
+    func testExactKeyAndTTL() throws {
+        var now = Date(timeIntervalSince1970: 1_000_000)
+        let store = store(now: { now })
+        XCTAssertFalse(store.isApproved(key))
+        try store.approve(key, sessionLabel: "t", sign: Self.fakeSign)
+        XCTAssertTrue(store.isApproved(key))
+        func variant(agent: AgentKind = .claude, session: String = "s", instance: String = "10@1",
+                     argv: [String]? = nil, env: [String: String] = [:]) -> ApprovalKey {
+            ApprovalKey(agent: agent, sessionId: session, agentInstance: instance, argv: argv ?? key.argv, env: env)
+        }
+        XCTAssertTrue(store.isApproved(variant()))
+        XCTAssertFalse(store.isApproved(variant(session: "other")))
+        XCTAssertFalse(store.isApproved(variant(instance: "11@1")), "same session ID from another agent process")
+        XCTAssertFalse(store.isApproved(variant(instance: "10@2")), "PID reused by a new process")
+        XCTAssertFalse(store.isApproved(variant(argv: key.argv + ["-n"])))
+        XCTAssertFalse(store.isApproved(variant(env: ["OP_ACCOUNT": "x"])))
+        XCTAssertFalse(store.isApproved(variant(agent: .codex)))
+
+        now += ApprovalStore.defaultTTL - 1
+        XCTAssertTrue(self.store(now: { now }).isApproved(key), "persists across instances")
+        now += 2
+        XCTAssertFalse(store.isApproved(key), "expires after 7 days")
+    }
+
+    func testCustomLifetime() throws {
+        var now = Date(timeIntervalSince1970: 1_000_000)
+        let store = store(now: { now })
+        try store.approve(key, sessionLabel: nil, itemLabel: "Item", ttl: 3600, sign: Self.fakeSign)
+        XCTAssertEqual(store.active.first?.itemLabel, "Item")
+        now += 3599
+        XCTAssertTrue(store.isApproved(key))
+        now += 2
+        XCTAssertFalse(store.isApproved(key), "a 1-hour approval lapses after an hour")
+    }
+
+    func testChangeExpiryResignsAndKeepsApprovalTime() throws {
+        var now = Date(timeIntervalSince1970: 1_000_000)
+        let store = store(now: { now })
+        try store.approve(key, sessionLabel: "s", itemLabel: "Item", ttl: 3600, sign: Self.fakeSign)
+        let approvedAt = try XCTUnwrap(store.active.first?.approvedAt)
+        now += 60
+        XCTAssertTrue(try store.changeExpiry(key, to: ApprovalStore.forever, sign: Self.fakeSign))
+        now += 30 * 24 * 3600
+        XCTAssertTrue(store.isApproved(key), "extended well past the original hour")
+        XCTAssertEqual(store.active.first?.approvedAt, approvedAt)
+        XCTAssertEqual(store.active.first?.itemLabel, "Item")
+        let other = ApprovalKey(agent: .codex, sessionId: "x", agentInstance: "1@1", argv: [], env: [:])
+        XCTAssertFalse(try store.changeExpiry(other, to: ApprovalStore.forever, sign: Self.fakeSign))
+    }
+
+    func testRevokeFromAnotherInstanceIsSeen() throws {
+        let daemonStore = store()
+        try daemonStore.approve(key, sessionLabel: nil, sign: Self.fakeSign)
+        Thread.sleep(forTimeInterval: 0.01)
+        XCTAssertEqual(try store().revoke { $0.key.sessionId == "s" }, 1)
+        XCTAssertFalse(daemonStore.isApproved(key))
+    }
+
+    func testTamperedEntriesAreIgnored() throws {
+        try store().approve(key, sessionLabel: nil, sign: Self.fakeSign)
+        func rewrite(_ edit: (inout [String: Any]) -> Void) throws {
+            var entries = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [[String: Any]]
+            edit(&entries[0])
+            try JSONSerialization.data(withJSONObject: entries).write(to: url)
+        }
+        XCTAssertTrue(store().isApproved(key))
+
+        // Replay onto another session.
+        try rewrite { e in var k = e["key"] as! [String: Any]; k["sessionId"] = "victim"; e["key"] = k }
+        let victim = ApprovalKey(agent: .claude, sessionId: "victim", agentInstance: key.agentInstance, argv: key.argv, env: [:])
+        XCTAssertFalse(store().isApproved(victim))
+        XCTAssertEqual(store().rejected.count, 1)
+
+        // Forged entry with no signature, and one with an extended expiry.
+        try store().revoke { _ in true }
+        try store().approve(key, sessionLabel: nil, sign: Self.fakeSign)
+        try rewrite { e in e["expiresAt"] = "2099-01-01T00:00:00Z" }
+        XCTAssertFalse(store().isApproved(key))
+        try rewrite { e in e["signature"] = nil }
+        XCTAssertFalse(store().isApproved(key))
+    }
+}
+
+final class CallerContextTests: XCTestCase {
+    func entry(_ pid: Int32, _ ppid: Int32, _ argv: [String]) -> ProcessEntry {
+        ProcessEntry(pid: pid, ppid: ppid, executable: argv.first ?? "", argv: argv)
+    }
+
+    static let claudeWrapper = """
+        source /Users/u/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && export CLAUDE_SESSION_ID=abc
+        : && setopt NO_EXTENDED_GLOB 2>/dev/null || true && { \\builtin unalias -- 'unsetenv'; } >/dev/null 2>&1 || true && eval 'TOKEN=$(op read '"'"'op://Private/x/password'"'"') && curl -H "Authorization: $TOKEN" https://api' < /dev/null && pwd -P >| /tmp/claude-acfc-cwd
+        """
+
+    func testClaudeToolCommandThroughSubshell() {
+        let chain = [
+            entry(40, 30, ["op", "read", "op://Private/x/password"]),
+            entry(30, 20, ["/bin/zsh", "-c", Self.claudeWrapper]),  // $(…) subshell
+            entry(20, 10, ["/bin/zsh", "-c", Self.claudeWrapper]),
+            entry(10, 1, ["claude", "--dangerously-skip-permissions"]),
+        ]
+        let ctx = CallerContext.from(chain: chain, agentPid: 10)
+        XCTAssertEqual(ctx.toolCommand, #"TOKEN=$(op read 'op://Private/x/password') && curl -H "Authorization: $TOKEN" https://api"#)
+        XCTAssertNil(ctx.viaProcess)
+    }
+
+    func testSkillScriptIsReportedAsVia() {
+        let chain = [
+            entry(50, 40, ["op", "item", "get", "TRACKER_KEY"]),
+            entry(40, 20, ["python3", "linear_client.py", "issues"]),
+            entry(20, 10, ["/bin/zsh", "-lc", "python3 linear_client.py issues"]),
+            entry(10, 1, ["/opt/homebrew/bin/codex"]),
+        ]
+        let ctx = CallerContext.from(chain: chain, agentPid: nil)
+        XCTAssertEqual(ctx.toolCommand, "python3 linear_client.py issues")
+        XCTAssertEqual(ctx.viaProcess, "python3 linear_client.py issues")
+    }
+
+    func testShellScriptBelowToolShell() {
+        let chain = [
+            entry(50, 40, ["op", "read", "op://a/b/c"]),
+            entry(40, 20, ["/bin/bash", "./publish-docs.sh"]),
+            entry(20, 10, ["bash", "-c", "./publish-docs.sh"]),
+            entry(10, 1, ["cursor-agent"]),
+        ]
+        let ctx = CallerContext.from(chain: chain, agentPid: nil)
+        XCTAssertEqual(ctx.toolCommand, "./publish-docs.sh")
+        XCTAssertEqual(ctx.viaProcess, "/bin/bash ./publish-docs.sh")
+    }
+
+    func testShellWords() {
+        XCTAssertEqual(ShellWords.firstWord(#"'a'"'"'b' rest"#), "a'b")
+        XCTAssertEqual(ShellWords.firstWord(#""x \"y\"" z"#), #"x "y""#)
+        XCTAssertEqual(ShellWords.firstWord(#"a\ b c"#), "a b")
+        XCTAssertNil(ShellWords.firstWord("'unterminated"))
+    }
+
+    func testParseProcArgs() {
+        var buf: [UInt8] = []
+        withUnsafeBytes(of: Int32(2)) { buf += $0 }
+        for part in ["/bin/zsh", "", "", "zsh", "-c", "FOO=bar"] {
+            buf += Array(part.utf8)
+            buf.append(0)
+        }
+        let args = ProcessTree.parseProcArgs(buf)!
+        XCTAssertEqual(args.executable, "/bin/zsh")
+        XCTAssertEqual(args.argv, ["zsh", "-c"])
+        XCTAssertEqual(args.env, ["FOO": "bar"])
+    }
+
+    func testLiveAncestryIncludesThisProcess() {
+        let chain = ProcessTree.ancestry(of: getpid())
+        XCTAssertEqual(chain.first?.pid, getpid())
+        XCTAssertGreaterThan(chain.count, 1)
+        XCTAssertEqual(chain.first?.env["HOME"], ProcessInfo.processInfo.environment["HOME"])
+        let start = try! XCTUnwrap(chain.first?.startTime)
+        let age = Date().timeIntervalSince1970 - start
+        XCTAssertTrue(age >= 0 && age < 3600, "start time is this test process's recent wall-clock start")
+    }
+}
+
+final class AuthWindowTests: XCTestCase {
+    func testRemaining() {
+        let start = Date(timeIntervalSince1970: 0)
+        let w = AuthWindow(signedIn: true, authorizedAt: start)
+        XCTAssertEqual(w.remaining(at: start.addingTimeInterval(3600)), 11 * 3600)
+        XCTAssertNil(w.remaining(at: start.addingTimeInterval(12 * 3600)), "12 hours up even if whoami still works")
+        XCTAssertNil(AuthWindow(signedIn: false, authorizedAt: start).remaining(at: start))
+        XCTAssertNil(AuthWindow(signedIn: true, authorizedAt: nil).remaining(at: start))
+    }
+
+    func testLabels() {
+        XCTAssertEqual(Duration.short(29), "<1m")
+        XCTAssertEqual(Duration.short(30), "1m")
+        XCTAssertEqual(Duration.short(32 * 60 + 29), "32m")
+        XCTAssertEqual(Duration.short(32 * 60 + 30), "33m")
+        XCTAssertEqual(Duration.short(59 * 60 + 29), "59m")
+        XCTAssertEqual(Duration.short(59 * 60 + 30), "1h")
+        XCTAssertEqual(Duration.short(11 * 3600 + 57 * 60), "12h")
+        XCTAssertEqual(Duration.short(11 * 3600 + 30 * 60), "12h")
+        XCTAssertEqual(Duration.short(11 * 3600 + 29 * 60), "11h")
+        XCTAssertEqual(Duration.long(11 * 3600 + 32 * 60 + 5), "11h 32m")
+        XCTAssertEqual(Duration.long(59 * 60), "59m")
+    }
+}
+
+final class SessionIdentityTests: XCTestCase {
+    func entry(_ pid: Int32, _ argv: [String], start: Double = 1) -> ProcessEntry {
+        ProcessEntry(pid: pid, ppid: 0, executable: argv[0], argv: argv, startTime: start)
+    }
+    let genuine: (ProcessEntry) -> AgentKind? = { $0.pid == 10 ? .claude : ($0.pid == 20 ? .codex : nil) }
+
+    func testIdentityIsTheNearestGenuineAgentProcess() {
+        let chain = [entry(40, ["op"]), entry(30, ["zsh"]), entry(10, ["claude"], start: 1.5)]
+        XCTAssertEqual(SessionIdentity.from(chain: chain, isGenuine: genuine),
+                       SessionIdentity(agent: .claude, agentPid: 10, agentInstance: "10@1500000"))
+    }
+
+    func testFakeAgentProcessIsSkipped() {
+        let chain = [entry(50, ["op"]), entry(44, ["claude"]), entry(30, ["zsh"]), entry(10, ["claude"])]
+        XCTAssertEqual(SessionIdentity.from(chain: chain, isGenuine: genuine)?.agentPid, 10)
+    }
+
+    func testNestedAgentsUseTheNearest() {
+        let chain = [entry(50, ["op"]), entry(40, ["zsh"]), entry(20, ["codex"]), entry(15, ["zsh"]), entry(10, ["claude"])]
+        XCTAssertEqual(SessionIdentity.from(chain: chain, isGenuine: genuine)?.agent, .codex)
+    }
+
+    func testCallerItselfDoesNotCount() {
+        XCTAssertNil(SessionIdentity.from(chain: [entry(10, ["claude"]), entry(5, ["zsh"])], isGenuine: genuine))
+    }
+
+    func testLiveClaudeIsGenuineWhenPresent() throws {
+        // Runs for real inside a Claude Code session; skipped elsewhere.
+        let chain = ProcessTree.ancestry(of: getpid())
+        guard let claude = chain.first(where: { $0.names.contains("claude") }) else { throw XCTSkip("not under Claude Code") }
+        XCTAssertEqual(AgentKind.verify(claude), .claude)
+        let impostor = ProcessEntry(pid: getpid(), ppid: 0, executable: "/tmp/claude", argv: ["claude"])
+        XCTAssertNil(AgentKind.verify(impostor), "a process named claude that isn't Anthropic-signed")
+    }
+}
+
+final class TerminalApprovalsTests: XCTestCase {
+    func testIdleAndCap() {
+        var now = Date(timeIntervalSince1970: 0)
+        let approvals = TerminalApprovals(idle: 600, now: { now })
+        let tab = TerminalKey(sid: 100, leaderStart: 1)
+        XCTAssertFalse(approvals.use(tab))
+        approvals.approve(tab, label: "iTerm · ttys012")
+        XCTAssertEqual(approvals.active.map(\.label), ["iTerm · ttys012"])
+        XCTAssertFalse(approvals.use(TerminalKey(sid: 100, leaderStart: 2)), "reused session ID")
+        XCTAssertFalse(approvals.use(TerminalKey(sid: 101, leaderStart: 1)), "another tab")
+        // Kept alive by use every 9 minutes...
+        for _ in 0..<5 { now += 9 * 60; XCTAssertTrue(approvals.use(tab)) }
+        // ...until 10 idle minutes pass.
+        now += 10 * 60
+        XCTAssertFalse(approvals.use(tab))
+        XCTAssertTrue(approvals.active.isEmpty)
+
+        approvals.approve(tab, label: "")
+        approvals.revoke(tab)
+        XCTAssertFalse(approvals.use(tab))
+
+        approvals.approve(tab, label: "")
+        for _ in 0..<(12 * 60 / 9) { now += 9 * 60; _ = approvals.use(tab) }
+        XCTAssertFalse(approvals.use(tab), "never beyond 12 hours, however busy")
+    }
+
+    func testTerminalInfo() {
+        let chain = [
+            ProcessEntry(pid: 50, ppid: 40, executable: "/Users/u/opProxy/bin/opProxy", argv: ["op", "read", "op://a/b/c"], tty: "ttys012"),
+            ProcessEntry(pid: 40, ppid: 30, executable: "/usr/bin/python3", argv: ["python3", "sync.py"], tty: "ttys012"),
+            ProcessEntry(pid: 30, ppid: 20, executable: "/bin/zsh", argv: ["-zsh"], tty: "ttys012"),
+            ProcessEntry(pid: 20, ppid: 10, executable: "/usr/bin/login", argv: ["login", "-fp", "u"]),
+            ProcessEntry(pid: 10, ppid: 1, executable: "/Applications/iTerm.app/Contents/MacOS/iTerm2", argv: ["iTerm2"]),
+        ]
+        let info = TerminalInfo.from(chain: chain, sid: 30)
+        XCTAssertEqual(info.app, "iTerm")
+        XCTAssertEqual(info.tty, "ttys012")
+        XCTAssertEqual(info.chain, ["50  op read op://a/b/c", "40  python3 sync.py", "30  -zsh"])
+
+        let spaceterm = [chain[0], ProcessEntry(pid: 9, ppid: 1, executable: "/Users/u/spaceterm/pty-daemon/pty-daemon", argv: ["pty-daemon"])]
+        XCTAssertEqual(TerminalInfo.from(chain: spaceterm, sid: 9).app, "Spaceterm")
+        XCTAssertEqual(TerminalInfo.from(chain: [chain[0], chain[1]], sid: 40).app, "python3")
+    }
+}
