@@ -75,11 +75,13 @@ final class AuthTracker {
         do { s = try currentSession() } catch {
             return .failure("could not start the 1Password session helper: \(error)")
         }
+        let isProbe = argv == ["whoami"]
         // Unauthorized, so this may raise 1Password's prompt: explain it alongside.
         let dismiss = argv.first != "whoami" && !current.signedIn ? promptObserver?.authorizationMayPrompt(.request) : nil
-        let response = s.run(argv, extraEnv: extraEnv, timeout: timeout)
+        let runArgv = isProbe && extraEnv["OP_ACCOUNT"] == nil ? whoamiArgv(s) : argv
+        let response = s.run(runArgv, extraEnv: extraEnv, timeout: timeout)
         dismiss?()
-        if argv == ["whoami"] {
+        if isProbe {
             update(signedIn: response.exitCode == 0, session: s)
         } else if !current.signedIn {
             // This run may have raised 1Password's prompt and authorized the session.
@@ -136,7 +138,23 @@ final class AuthTracker {
     }
 
     private func probe(_ s: OpSession) {
-        update(signedIn: s.run(["whoami"], extraEnv: [:], timeout: 10).exitCode == 0, session: s)
+        update(signedIn: s.run(whoamiArgv(s), extraEnv: [:], timeout: 10).exitCode == 0, session: s)
+    }
+
+    /// A bare `op whoami` fails even in an authorized session unless op's config has a
+    /// `latest_signin`, which signing in through the desktop app never writes. With a single
+    /// account, name it; `account list` never prompts.
+    private var whoamiAccount: [String]?
+    private func whoamiArgv(_ s: OpSession) -> [String] {
+        if let cached = lock.withLock({ whoamiAccount }) { return ["whoami"] + cached }
+        let listed = s.run(["account", "list", "--format", "json"], extraEnv: [:], timeout: 10)
+        guard listed.exitCode == 0,
+              let accounts = (try? JSONSerialization.jsonObject(with: listed.stdout)) as? [[String: Any]] else {
+            return ["whoami"]
+        }
+        let account = accounts.count == 1 ? (accounts[0]["user_uuid"] as? String).map { ["--account", $0] } ?? [] : []
+        lock.withLock { whoamiAccount = account }
+        return ["whoami"] + account
     }
 
     private func update(signedIn: Bool, session s: OpSession) {
