@@ -38,7 +38,8 @@ AUTH="$WORK/authorized"
 echo run >> "$WORK/stub-runs"
 case "\$*" in
   *fail*) echo "stub failure" >&2; exit 7 ;;
-  whoami) [ -e "\$AUTH" ] && { echo "stub whoami"; exit 0; }; echo "not signed in" >&2; exit 1 ;;
+  whoami|"whoami --account "*) [ -e "\$AUTH" ] && { echo "stub whoami"; exit 0; }; echo "not signed in" >&2; exit 1 ;;
+  "account list --format json") echo '[{"user_uuid": "STUBUSER", "url": "stub.1password.com"}]'; exit 0 ;;
   "vault list --format json") [ -e "$WORK/refuse-auth" ] && { echo "authorization dismissed" >&2; exit 1; } ;;
   *sid*) python3 -c 'import os; print(os.getsid(0))'; exit 0 ;;
   "item get abcdefghijklmnopqrstuvwxyz --format json --vault zyxwvutsrqponmlkjihgfedcba")
