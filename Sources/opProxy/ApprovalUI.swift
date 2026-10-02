@@ -183,6 +183,9 @@ final class ApprovalView: NSView {
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let abandonedNote = NSTextField(wrappingLabelWithString:
         "The agent stopped waiting. Approving still lets its retry through.")
+    private let copyButton = NSButton()
+    /// The dialog as plain text, one entry per block, appended as each block is built.
+    private var transcript: [String] = []
 
     /// `authContext` drives the embedded Touch ID glyph; nil draws a static one (previews).
     init(prompt: ApprovalPrompt, actions: ApprovalViewActions?, authContext: LAContext?) {
@@ -219,14 +222,14 @@ final class ApprovalView: NSView {
         switch prompt.requester {
         case .agent(let agent):
             if let tool = agent.caller.toolCommand {
-                stack.addArrangedSubview(section("Agent's shell command", Self.textBlock(tool, mono: true, maxLines: 8)))
+                stack.addArrangedSubview(section("Agent's shell command", tool, mono: true, maxLines: 8))
             }
             if let message = agent.lastMessage {
-                stack.addArrangedSubview(section("Agent's last message", Self.textBlock(message, mono: false, maxLines: 6)))
+                stack.addArrangedSubview(section("Agent's last message", message, mono: false, maxLines: 6))
             }
         case .terminal(let terminal):
-            stack.addArrangedSubview(section("Process chain (nearest first)",
-                                             Self.textBlock(terminal.info.chain.joined(separator: "\n"), mono: true, maxLines: 8)))
+            stack.addArrangedSubview(section("Process chain (nearest first)", terminal.info.chain.joined(separator: "\n"),
+                                             mono: true, maxLines: 8))
         }
         stack.addArrangedSubview(metadata(prompt))
         stack.addArrangedSubview(footer(prompt))
@@ -301,7 +304,13 @@ final class ApprovalView: NSView {
         waitingLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         waitingLabel.textColor = Caution.accent
         waitingLabel.isHidden = true
-        let title = NSStackView(views: [heading, NSView(), waitingLabel])
+        copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy dialog text")
+        copyButton.toolTip = "Copy this request as text"
+        copyButton.isBordered = false
+        copyButton.contentTintColor = Caution.secondary
+        copyButton.target = self
+        copyButton.action = #selector(copyTranscript)
+        let title = NSStackView(views: [heading, NSView(), waitingLabel, copyButton])
         title.orientation = .horizontal
         title.alignment = .firstBaseline
         title.widthAnchor.constraint(equalToConstant: Self.inner).isActive = true
@@ -333,11 +342,14 @@ final class ApprovalView: NSView {
         let kicker = NSTextField(labelWithString: "⚠︎  1PASSWORD SECURITY APPROVAL")
         kicker.font = .systemFont(ofSize: 11, weight: .heavy)
         kicker.textColor = Caution.accent
-        return [kicker, title] + (hero(prompt).map { [$0] } ?? []) + [row]
+        let hero = hero(prompt)
+        transcript.append(([kicker.stringValue, heading.stringValue] + [hero?.stringValue, whereText].compactMap { $0 })
+            .joined(separator: "\n"))
+        return [kicker, title] + (hero.map { [$0] } ?? []) + [row]
     }
 
     /// The item being accessed, as the headline: it's what the approval is really about.
-    private func hero(_ prompt: ApprovalPrompt) -> NSView? {
+    private func hero(_ prompt: ApprovalPrompt) -> NSTextField? {
         guard let subject = prompt.description.subject else { return nil }
         let text = NSMutableAttributedString(string: prompt.resolvedItem ?? subject, attributes: [
             .font: NSFont.systemFont(ofSize: 26, weight: .heavy), .foregroundColor: Caution.accent])
@@ -357,6 +369,12 @@ final class ApprovalView: NSView {
         let grid = NSGridView()
         grid.rowSpacing = 6
         grid.columnSpacing = 12
+        var lines: [String] = []
+        defer { transcript.append(lines.joined(separator: "\n")) }
+        func row(_ label: String, _ field: NSTextField) {
+            grid.addRow(with: [Self.label(label, size: 13), field])
+            lines.append("\(label): \(field.stringValue)")
+        }
         for detail in prompt.description.details {
             let value = detail.value
             let field: NSTextField
@@ -371,12 +389,11 @@ final class ApprovalView: NSView {
                 field.attributedStringValue = text
             case .normal: field = Self.value(value, size: 14, weight: .medium)
             case .placeholder: field = Self.value(value, size: 14, color: Caution.secondary)
-            case .warning: field = Self.value(value, size: 14, weight: .bold, color: Caution.danger)
             }
-            grid.addRow(with: [Self.label(detail.label, size: 13), field])
+            row(detail.label, field)
         }
         let command = "op " + prompt.request.argv.map(shellQuote).joined(separator: " ")
-        grid.addRow(with: [Self.label("Command", size: 13), Self.value(command, size: 12, mono: true)])
+        row("Command", Self.value(command, size: 12, mono: true))
         Self.styleLabelColumn(grid)
         return CardView(content: grid, width: Self.inner, inset: NSEdgeInsets(top: 12, left: 0, bottom: 12, right: 14))
     }
@@ -385,8 +402,11 @@ final class ApprovalView: NSView {
         let grid = NSGridView()
         grid.rowSpacing = 3
         grid.columnSpacing = 12
+        var lines: [String] = []
+        defer { transcript.append(lines.joined(separator: "\n")) }
         func row(_ label: String, _ value: String) {
             grid.addRow(with: [Self.label(label, size: 11), Self.value(value, size: 11, mono: true, color: Caution.secondary)])
+            lines.append("\(label): \(value)")
         }
         switch prompt.requester {
         case .agent(let a):
@@ -481,11 +501,24 @@ final class ApprovalView: NSView {
     @objc private func deny() { actions?.deny() }
     @objc private func openSession() { actions?.openSession() }
 
+    var copyText: String { transcript.joined(separator: "\n\n") }
+
+    /// Puts the whole request on the pasteboard, for handing to an agent. Approves nothing.
+    @objc private func copyTranscript() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copyText, forType: .string)
+        copyButton.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: "Copied")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            self?.copyButton.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy dialog text")
+        }
+    }
+
     // MARK: Pieces
 
-    private func section(_ title: String, _ body: NSView) -> NSView {
+    private func section(_ title: String, _ text: String, mono: Bool, maxLines: Int) -> NSView {
+        transcript.append("\(title):\n\(text)")
         let label = Self.label(title, size: 11, weight: .semibold)
-        let stack = NSStackView(views: [label, body])
+        let stack = NSStackView(views: [label, Self.textBlock(text, mono: mono, maxLines: maxLines)])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 5

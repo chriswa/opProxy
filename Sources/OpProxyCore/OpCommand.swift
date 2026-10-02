@@ -141,8 +141,6 @@ public struct OpCommand: Equatable {
             case normal
             /// A default standing in for a missing value, e.g. "any vault".
             case placeholder
-            /// Worth a second look, e.g. revealing concealed values.
-            case warning
         }
 
         public let label: String
@@ -199,9 +197,6 @@ public struct OpCommand: Equatable {
                 } else {
                     details.append(Detail(label: "Fields", value: "all fields", style: .placeholder))
                 }
-                let revealed = flags["--reveal"] != nil || flags["--otp"] != nil
-                details.append(revealed ? Detail(label: "Reveals secrets", value: "yes", style: .warning)
-                                        : Detail(label: "Reveals secrets", value: "no"))
                 let where_ = vault.map { " in \($0)" } ?? ""
                 let what = fieldNames.map { " (\($0))" } ?? (flags["--otp"] != nil ? " (OTP)" : "")
                 return Description(action: "Get an item", subject: item, details: details + account,

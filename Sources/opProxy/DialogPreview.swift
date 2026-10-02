@@ -110,6 +110,7 @@ enum DialogPreview {
                 if name == "read-by-id" { view.setWaiting(2) }
                 view.setRemaining(name == "minimal" ? 14 : 87)
                 if name == "minimal" { view.showAbandoned() }
+                try? view.copyText.write(to: dir.appendingPathComponent("dialog-\(name).txt"), atomically: true, encoding: .utf8)
                 NSApp.appearance = NSAppearance(named: appearance)
                 let window = NSWindow(contentRect: NSRect(origin: .zero, size: view.fittingSize),
                                       styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)

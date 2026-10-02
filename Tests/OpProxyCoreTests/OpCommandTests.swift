@@ -87,14 +87,13 @@ final class OpCommandTests: XCTestCase {
         let d = OpCommand(argv: ["item", "get", "Chat webhook", "--vault", "private", "--reveal", "--fields", "credential"]).description
         XCTAssertEqual(d.subject, "Chat webhook")
         XCTAssertEqual(d.summary, "get “Chat webhook” in private (credential)")
-        XCTAssertTrue(d.details.contains(.init(label: "Reveals secrets", value: "yes", style: .warning)))
+        XCTAssertEqual(d.details.map(\.label), ["Vault", "Fields"])
         XCTAssertEqual(OpCommand.readableFields("label=A,label=B"), "A, B")
         XCTAssertEqual(OpCommand.readableFields("type=otp"), "type otp")
 
         let noVault = OpCommand(argv: ["item", "get", "em5qippbdjh4jgmmhkidhxonka", "--format", "json"]).description
         XCTAssertTrue(noVault.details.contains(.init(label: "Vault", value: "any vault", style: .placeholder)))
         XCTAssertTrue(noVault.details.contains(.init(label: "Fields", value: "all fields", style: .placeholder)))
-        XCTAssertTrue(noVault.details.contains(.init(label: "Reveals secrets", value: "no")))
     }
 
     func testLooksLikeID() {
