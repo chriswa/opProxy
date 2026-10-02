@@ -65,6 +65,7 @@ case "daemon":
                            pollInterval: Double(TestKnobs.value("OPPROXY_POLL_SECONDS") ?? "") ?? 60,
                            autoAuthorize: TestKnobs.value("OPPROXY_NO_AUTO_AUTH") == nil)
     let daemon = Daemon(paths: paths, approver: approver, log: log, auth: auth)
+    let systemEvents = LockDiagnostics.logSystemEvents(to: log)
     // Attached before start(): the startup authorization is the first prompt it explains.
     let authContext = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? AuthContextPanel(expiresIn: AuthWindow.hardCap, log: log) : nil
     auth.promptObserver = authContext
@@ -72,7 +73,7 @@ case "daemon":
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let menuBar = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? MenuBarController(daemon: daemon) : nil
-    withExtendedLifetime((menuBar, authContext)) { app.run() }
+    withExtendedLifetime((menuBar, authContext, systemEvents)) { app.run() }
 
 case "disable", "enable":
     do {

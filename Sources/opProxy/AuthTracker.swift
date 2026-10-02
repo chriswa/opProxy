@@ -19,7 +19,8 @@ protocol AuthPromptObserver: AnyObject {
 
 /// Owns the session holder that runs `op`, and tracks its 1Password authorization window
 /// for the menu bar. `op whoami` never prompts, so polling it is safe, and it also counts as
-/// activity, which stops 1Password's 10-minute idle timeout.
+/// CLI activity, which stops the CLI's 10-minute idle timeout. It can't stop the 1Password
+/// app from locking (see `LockDiagnostics`), which ends the authorization too.
 final class AuthTracker {
     let executable: String
     let log: Log
@@ -82,7 +83,7 @@ final class AuthTracker {
         let response = s.run(runArgv, extraEnv: extraEnv, timeout: timeout)
         dismiss?()
         if isProbe {
-            update(signedIn: response.exitCode == 0, session: s)
+            update(probe: response, session: s)
         } else if !current.signedIn {
             // This run may have raised 1Password's prompt and authorized the session.
             probe(s)
@@ -110,7 +111,7 @@ final class AuthTracker {
         guard result.exitCode == 0 else {
             fresh.close()
             let reason = String(decoding: result.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            log.write("refresh failed: \(reason)")
+            log.write("refresh failed: \(reason) (\(LockDiagnostics.summary()))")
             return reason.isEmpty ? "1Password did not authorize the new session" : reason
         }
         let (old, changed) = lock.withLock { () -> (OpSession?, AuthWindow) in
@@ -138,7 +139,7 @@ final class AuthTracker {
     }
 
     private func probe(_ s: OpSession) {
-        update(signedIn: s.run(whoamiArgv(s), extraEnv: [:], timeout: 10).exitCode == 0, session: s)
+        update(probe: s.run(whoamiArgv(s), extraEnv: [:], timeout: 10), session: s)
     }
 
     /// A bare `op whoami` fails even in an authorized session unless op's config has a
@@ -157,14 +158,21 @@ final class AuthTracker {
         return ["whoami"] + account
     }
 
-    private func update(signedIn: Bool, session s: OpSession) {
+    private func update(probe: ProxyResponse, session s: OpSession) {
+        let signedIn = probe.exitCode == 0
         let changed: AuthWindow? = lock.withLock {
             guard s === session, signedIn != window.signedIn else { return nil }
             window = AuthWindow(signedIn: signedIn, authorizedAt: signedIn ? Date() : nil)
             return window
         }
         guard let changed else { return }
-        log.write(signedIn ? "1Password authorized; expires \(format(changed.expiresAt))" : "1Password authorization ended")
+        if signedIn {
+            log.write("1Password authorized; expires \(format(changed.expiresAt))")
+        } else {
+            let error = String(decoding: probe.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            log.write("1Password authorization ended: \(error.isEmpty ? "whoami exited \(probe.exitCode)" : error) "
+                      + "(\(LockDiagnostics.summary()))")
+        }
         notify(changed)
         if signedIn { lock.withLock { autoSuspended = false } } else { autoRefresh(.expired) }
     }
