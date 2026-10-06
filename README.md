@@ -42,7 +42,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 
 ### The approval dialog
 
-- **Always on top, one at a time.** The dialog takes focus when it appears. Any other requests wait in a queue, with a count shown; identical requests share one dialog.
+- **Always on top, one at a time.** The dialog takes focus and plays a rising, question-like chime when it appears. Any other requests wait in a queue, with a count shown; identical requests share one dialog.
 - **The item is the headline.** Opaque item and vault IDs are resolved to their names through the real `op`, ahead of the dialog.
 - **Who is asking, by name.** For a request from a Spaceterm surface, the dialog names the agent the way Spaceterm does, as in "Kevin (Claude Code) … in “fix flaky tests”". Spaceterm reuses names once a surface is archived, so the name appears only in live prompts (the dialog, the phone and the Touch ID reason) and is never saved with an approval; stored approvals keep only the surface's title.
 - **Context comes next:** the details, the exact `op` command, the agent's full shell command (recovered from the process tree), its most recent transcript message, then PIDs and the working directory.
@@ -55,6 +55,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 
 Every request that would show the dialog is also published on a feed socket, `~/.opProxy/approval-feed.sock`, which Spaceterm relays to its iPhone app. The protocol is `~/spaceterm/APPROVAL_FEED.md`.
 
+- **The same chime.** A new request rings the phone with the dialog's chime while Spaceterm is open on it.
 - **Same options as the desktop.** The phone shows what the dialog shows (the item, the request, the `op` command, the agent's shell command and last message, PIDs and directory) and offers the same choices as one list: **Once**, then **1 Day** and **Forever**, each for this agent or all agents, for agents; **Once · This Terminal Tab** for terminals.
 - **The first answer wins.** The dialog and the phone ask at the same time. Answer on either and the other one goes away; a late answer from the other side is refused. A request leaves the phone when it's answered anywhere or times out, and its countdown on the phone starts when its dialog appears on the Mac.
 - **Phone approvals work like Touch ID ones.** A lasting agent approval from the phone is stored and lasts just as long. It can't be signed by the Mac's Secure Enclave key without your Touch ID, so it's stored with the phone's own signed reply instead. That reply commits to the exact entry (which agents, command, approval time and expiry), so it can't be edited, moved to another request, widened to all agents or extended.

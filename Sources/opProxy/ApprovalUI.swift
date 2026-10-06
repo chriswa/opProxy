@@ -101,6 +101,7 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
         // typing that lands here does nothing.
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        Chime.play()
         panel.ignoreMouse(for: GuardedPanel.clickGuard)
         self.panel = panel
         listen(with: context)

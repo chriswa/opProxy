@@ -465,3 +465,15 @@ final class TerminalApprovalsTests: XCTestCase {
         XCTAssertEqual(TerminalInfo.from(chain: [chain[0], chain[1]], sid: 40).app, "python3")
     }
 }
+
+final class ChimeTests: XCTestCase {
+    func testChimeIsAPlayableWAVWithinFullScale() {
+        let samples = Chime.samples()
+        XCTAssertEqual(samples.count, Int(Chime.length * Double(Chime.sampleRate)))
+        XCTAssertEqual(samples.map(abs).max() ?? 0, Chime.peak, accuracy: 1e-9)
+        XCTAssertEqual(samples.first, 0)
+        let wav = Chime.wav()
+        XCTAssertEqual(wav.prefix(4), Data("RIFF".utf8))
+        XCTAssertEqual(wav.count, 44 + samples.count * 2)
+    }
+}
