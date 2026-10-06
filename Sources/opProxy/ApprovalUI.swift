@@ -192,8 +192,11 @@ final class ApprovalView: NSView {
     private let authSlot = NSView()
     private let waitingLabel = NSTextField(labelWithString: "")
     private let durationControl = NSSegmentedControl()
-    private var durations: [ApprovalOption] = []
-    private var defaultDuration = 0
+    /// Agents only: which agents a lasting approval covers.
+    private let reachControl = NSSegmentedControl()
+    private var options: [ApprovalOption] = []
+    /// Agents pick a duration and a reach; terminals pick straight from `options`.
+    private var isAgent = false
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let abandonedNote = NSTextField(wrappingLabelWithString:
         "The agent stopped waiting. Approving still lets its retry through.")
@@ -440,41 +443,67 @@ final class ApprovalView: NSView {
     }
 
     /// What Touch ID will grant; chosen before touching.
-    var selectedScope: ApprovalScope { durations[max(0, durationControl.selectedSegment)].scope }
+    var selectedScope: ApprovalScope {
+        let i = max(0, durationControl.selectedSegment)
+        guard isAgent else { return options[i].scope }
+        guard i > 0 else { return .once }
+        return .lasting(ApprovalLifetime.allCases[i - 1], ApprovalReach.allCases[max(0, reachControl.selectedSegment)])
+    }
 
-    /// "Touch ID runs this one request…": the shared hint, said of Touch ID.
-    private func hintText(_ option: ApprovalOption) -> String {
-        "Touch ID " + option.hint.prefix(1).lowercased() + option.hint.dropFirst()
+    /// Shows what the current choice grants; the widest grant is said in red.
+    private func scopeChanged() {
+        let scope = selectedScope
+        reachControl.isEnabled = scope != .once
+        guard let option = options.first(where: { $0.scope == scope }) else { return }
+        hint.stringValue = "Touch ID " + option.hint.prefix(1).lowercased() + option.hint.dropFirst()
+        hint.textColor = scope == .lasting(.forever, .allAgents) ? Caution.danger : Caution.secondary
+    }
+
+    private static func segments(_ control: NSSegmentedControl, _ labels: [String], selected: Int) {
+        control.segmentCount = labels.count
+        for (i, label) in labels.enumerated() { control.setLabel(label, forSegment: i) }
+        control.trackingMode = .selectOne
+        control.selectedSegment = selected
+        control.controlSize = .large
     }
 
     private func footer(_ prompt: ApprovalPrompt) -> NSView {
-        (durations, defaultDuration) = ApprovalOptions.for(prompt.requester)
-        durationControl.segmentCount = durations.count
-        for (i, d) in durations.enumerated() { durationControl.setLabel(d.label, forSegment: i) }
-        durationControl.trackingMode = .selectOne
-        durationControl.selectedSegment = defaultDuration
-        durationControl.target = self
-        durationControl.action = #selector(durationChanged)
-        durationControl.controlSize = .large
-        let allow = Self.label("Allow", size: 13)
-        let durationRow = NSStackView(views: [allow, durationControl])
-        durationRow.orientation = .horizontal
-        durationRow.spacing = 10
-        hint.stringValue = hintText(durations[defaultDuration])
-
+        let defaultIndex: Int
+        (options, defaultIndex) = ApprovalOptions.for(prompt.requester)
+        if case .agent = prompt.requester { isAgent = true }
+        let choices = NSGridView()
+        choices.rowSpacing = 6
+        choices.columnSpacing = 10
+        choices.rowAlignment = .lastBaseline
+        if isAgent {
+            Self.segments(durationControl, ["Once"] + ApprovalLifetime.allCases.map(\.label), selected: 0)
+            Self.segments(reachControl, ApprovalReach.allCases.map(\.label), selected: 0)
+            choices.addRow(with: [Self.label("Allow", size: 13), durationControl])
+            choices.addRow(with: [Self.label("For", size: 13), reachControl])
+        } else {
+            Self.segments(durationControl, options.map(\.label), selected: defaultIndex)
+            choices.addRow(with: [Self.label("Allow", size: 13), durationControl])
+        }
+        for control in [durationControl, reachControl] {
+            control.target = self
+            control.action = #selector(choiceChanged)
+        }
+        choices.column(at: 0).xPlacement = .trailing
+        // Hug the controls, so the grid doesn't spread across the footer.
+        choices.setContentHuggingPriority(.required, for: .horizontal)
         hint.font = .systemFont(ofSize: 11)
-        hint.textColor = Caution.secondary
+        scopeChanged()
         note.font = .systemFont(ofSize: 11, weight: .semibold)
         note.textColor = Caution.danger
         note.isHidden = true
         abandonedNote.font = .systemFont(ofSize: 11, weight: .semibold)
         abandonedNote.textColor = Caution.accent
         abandonedNote.isHidden = true
-        let text = NSStackView(views: [durationRow, abandonedNote, hint, note])
+        let text = NSStackView(views: [choices, abandonedNote, hint, note])
         text.orientation = .vertical
         text.alignment = .leading
         text.spacing = 4
-        text.setCustomSpacing(8, after: durationRow)
+        text.setCustomSpacing(8, after: choices)
         text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         for (button, action) in [(denyButton, #selector(deny)), (retryButton, #selector(retry))] {
@@ -498,7 +527,16 @@ final class ApprovalView: NSView {
         return row
     }
 
-    @objc private func durationChanged() { hint.stringValue = hintText(durations[durationControl.selectedSegment]) }
+    @objc private func choiceChanged() { scopeChanged() }
+
+    #if OPPROXY_TESTING
+    /// Previews: shows the footer as if `lifetime` and `reach` were chosen.
+    func choose(_ lifetime: ApprovalLifetime, _ reach: ApprovalReach) {
+        durationControl.selectedSegment = 1 + ApprovalLifetime.allCases.firstIndex(of: lifetime)!
+        reachControl.selectedSegment = ApprovalReach.allCases.firstIndex(of: reach)!
+        scopeChanged()
+    }
+    #endif
     @objc private func retry() { actions?.retry() }
     @objc private func deny() { actions?.deny() }
     @objc private func openSession() { actions?.openSession() }

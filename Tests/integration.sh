@@ -191,17 +191,32 @@ SID=sess-O agent "$OP" read op://once/x/y >/dev/null
 SID=sess-O agent "$OP" read op://once/x/y >/dev/null
 check "only this once: every call asks" [ "$(count 'prompting: claude:sess-O')" = 2 ]
 check "only this once: nothing stored" not_in "sess-O" "$OPPROXY_HOME/approvals.json"
-start_daemon approved-hour
-SID=sess-H agent "$OP" read op://hour/x/y >/dev/null
-SID=sess-H agent "$OP" read op://hour/x/y >/dev/null
-check "1 hour: second call silent" [ "$(count 'prompting: claude:sess-H')" = 1 ]
+start_daemon approved
+SID=sess-H agent "$OP" read op://day/x/y >/dev/null
+INST=resumed SID=sess-H agent "$OP" read op://day/x/y >/dev/null
+check "this agent: a resumed session (new process, same ID) runs silently" [ "$(count 'prompting: claude:sess-H')" = 1 ]
+SID=sess-I agent "$OP" read op://day/x/y >/dev/null
+check "this agent: another session asks" [ "$(count 'prompting: claude:sess-I')" = 1 ]
 ttl=$(python3 -c "
 import json, sys; from datetime import datetime
 for a in json.load(open(sys.argv[1])):
-    if a['key']['sessionId'] == 'sess-H':
+    if a['key']['audience'].get('session', {}).get('sessionId') == 'sess-H':
         f = lambda s: datetime.fromisoformat(s.replace('Z', '+00:00'))
         print(int((f(a['expiresAt']) - f(a['approvedAt'])).total_seconds()))" "$OPPROXY_HOME/approvals.json")
-check "1 hour: stored with a signed 1-hour expiry" [ "$ttl" = 3600 ]
+check "1 day: stored with a signed 1-day expiry" [ "$ttl" = 86400 ]
+start_daemon approved-all
+SID=sess-J agent "$OP" read op://all/x/y >/dev/null
+SID=sess-K agent "$OP" read op://all/x/y >/dev/null
+agent env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_SESSION_ID "$OP" read op://all/x/y >/dev/null
+check "all agents: other sessions run silently" [ "$(count 'prompting: .* op read op://all/x/y')" = 1 ]
+SID=sess-K agent "$OP" read op://all/x/y -n >/dev/null
+check "all agents: only that exact command" [ "$(count 'prompting: claude:sess-K op read op://all/x/y -n')" = 1 ]
+check "all agents: stored forever for every agent" python3 -c "
+import json, sys
+[a] = [a for a in json.load(open(sys.argv[1])) if a['key']['argv'] == ['read', 'op://all/x/y']]
+assert a['key']['audience'] == {'allAgents': {}} and a['expiresAt'].startswith('2100'), a
+assert a['grantedTo'] == {'session': {'agent': 'claude', 'sessionId': 'sess-J'}}, a" "$OPPROXY_HOME/approvals.json"
+check "all agents: listed" grep -q "^All agents" <<<"$("$BIN" list)"
 start_daemon approved 1
 
 # --- the approval feed: a paired phone answers before the (scripted, 30s late) dialog
@@ -219,32 +234,33 @@ check "phone once: request ran" via_daemon "$(cat "$WORK/asked")"
 check "phone once: nothing stored" not_in "sess-P" "$OPPROXY_HOME/approvals.json"
 check "phone once: logged" grep -q "phone approve once: Test Phone" "$LOG"
 check "phone: document headlines the item" grep -q '"title":"item"' "$WORK/phone-doc.json"
-check "phone: document offers the dialog's options" grep -q '"default":"7d","id":"duration","label":"Allow","options":\[{"hint":"Runs this one request' "$WORK/phone-doc.json"
+check "phone: document offers the dialog's options" grep -q '"default":"once","id":"duration","label":"Allow","options":\[{"hint":"Runs this one request' "$WORK/phone-doc.json"
+check "phone: document offers all agents" grep -q '"id":"forever-all","label":"Forever · All agents"' "$WORK/phone-doc.json"
 check "phone: document confirms what approving grants" grep -q '"confirm":"Let Claude Code .*read phone/item/field"' "$WORK/phone-doc.json"
 
-ask sess-Q approve 7d
-check "phone 7d: request ran" via_daemon "$(cat "$WORK/asked")"
+ask sess-Q approve 1d
+check "phone 1d: request ran" via_daemon "$(cat "$WORK/asked")"
 out=$(SID=sess-Q agent "$OP" read op://phone/item/field)
-check "phone 7d: repeat runs without a prompt" [ "$(count 'prompting: claude:sess-Q')" = 1 ]
-check "phone 7d: repeat ran" via_daemon "$out"
-check "phone 7d: stored with the phone's proof" python3 -c "
+check "phone 1d: repeat runs without a prompt" [ "$(count 'prompting: claude:sess-Q')" = 1 ]
+check "phone 1d: repeat ran" via_daemon "$out"
+check "phone 1d: stored with the phone's proof" python3 -c "
 import json, sys; from datetime import datetime
 f = lambda s: datetime.fromisoformat(s.replace('Z', '+00:00'))
-[a] = [a for a in json.load(open(sys.argv[1])) if a['key']['sessionId'] == 'sess-Q']
+[a] = [a for a in json.load(open(sys.argv[1])) if a['key']['audience'].get('session', {}).get('sessionId') == 'sess-Q']
 assert a['deviceProof']['keyId'] and 'signature' not in a, a
-assert (f(a['expiresAt']) - f(a['approvedAt'])).total_seconds() == 7 * 86400" "$OPPROXY_HOME/approvals.json"
-check "phone 7d: devices lists the phone" grep -q "^Test Phone  [0-9a-f]\{4\} " <<<"$("$BIN" devices)"
+assert (f(a['expiresAt']) - f(a['approvedAt'])).total_seconds() == 86400" "$OPPROXY_HOME/approvals.json"
+check "phone 1d: devices lists the phone" grep -q "^Test Phone  [0-9a-f]\{4\} " <<<"$("$BIN" devices)"
 python3 - "$OPPROXY_HOME/approvals.json" <<'PY'
 import json, sys
 entries = json.load(open(sys.argv[1]))
 for a in entries:
-    if a['key']['sessionId'] == 'sess-Q': a['expiresAt'] = '2099-01-01T00:00:00Z'
+    if a['key']['audience'].get('session', {}).get('sessionId') == 'sess-Q': a['expiresAt'] = '2099-01-01T00:00:00Z'
 json.dump(entries, open(sys.argv[1] + '.edited', 'w'))
 PY
-check "phone 7d: an extended expiry doesn't verify" grep -q "Ignoring 1 entry with invalid signatures" <<<"$(cp "$OPPROXY_HOME/approvals.json" "$WORK/approvals.saved"; cp "$OPPROXY_HOME/approvals.json.edited" "$OPPROXY_HOME/approvals.json"; "$BIN" list; cp "$WORK/approvals.saved" "$OPPROXY_HOME/approvals.json")"
+check "phone 1d: an extended expiry doesn't verify" grep -q "Ignoring 1 entry with invalid signatures" <<<"$(cp "$OPPROXY_HOME/approvals.json" "$WORK/approvals.saved"; cp "$OPPROXY_HOME/approvals.json.edited" "$OPPROXY_HOME/approvals.json"; "$BIN" list; cp "$WORK/approvals.saved" "$OPPROXY_HOME/approvals.json")"
 start_daemon denied
 SID=sess-Q agent "$OP" read op://phone/item/field >/dev/null 2>&1
-check "phone 7d: still approved after a restart" [ "$(count 'prompting: claude:sess-Q')" = 1 ]
+check "phone 1d: still approved after a restart" [ "$(count 'prompting: claude:sess-Q')" = 1 ]
 "$BIN" unpair --all >/dev/null
 SID=sess-Q agent "$OP" read op://phone/item/field >/dev/null 2>&1
 check "unpair: the phone's approvals stop working" [ "$(count 'prompting: claude:sess-Q')" = 2 ]
@@ -326,17 +342,18 @@ check "IDs: dialog shows the item's name" grep -q '"resolvedItem":"Stub Item Tit
 check "IDs: dialog shows the vault's name" grep -q '"resolvedVault":"Stub Vault"' "$LOG"
 check "IDs: approval labelled by name" grep -q '"itemLabel" : "Stub Item Title"' "$OPPROXY_HOME/approvals.json"
 
-# --- approvals belong to the agent process, not whatever session ID a command claims
+# --- "this agent" approvals follow the claimed session ID, so a command that claims another
+# session's ID reaches its approvals (README: known weaknesses)
 SID=sess-B agent "$OP" read op://x/y/z >/dev/null
 INST=sess-A SID=sess-A agent env CLAUDE_CODE_SESSION_ID=sess-B "$OP" read op://x/y/z >/dev/null
-check "exec env session swap: prompts again" [ "$(count 'prompting: claude:sess-B op read op://x/y/z')" = 2 ]
+check "exec env session swap: reaches that session's approvals" [ "$(count 'prompting: claude:sess-B op read op://x/y/z')" = 1 ]
 
 # --- forged or edited approvals.json entries don't verify
 python3 - "$OPPROXY_HOME/approvals.json" <<'PY'
 import json, sys
 entries = json.load(open(sys.argv[1]))
 forged = json.loads(json.dumps(entries[0]))
-forged["key"]["sessionId"] = "sess-E"; forged["key"]["agentInstance"] = "fake:sess-E"
+forged["key"]["audience"] = {"session": {"agent": "claude", "sessionId": "sess-E"}}
 forged["key"]["argv"] = ["read", "op://forged/item/field"]
 json.dump(entries + [forged], open(sys.argv[1], "w"))
 PY

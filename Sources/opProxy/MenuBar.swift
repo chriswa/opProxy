@@ -88,7 +88,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             if let command = approval.command { info.append(String(command.prefix(90))) }
             let expiry: String
             switch approval.expiresAt {
-            case .some(let date) where date >= ApprovalStore.forever: expiry = "never expires (while the agent runs)"
+            case .some(let date) where date >= ApprovalStore.forever: expiry = "never expires"
             case .some(let date): expiry = "expires \(time.string(from: date))"
             case .none: expiry = "lapses after \(Int(TerminalApprovals.defaultIdle / 60)) idle minutes"
             }
@@ -101,26 +101,41 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             submenu.addItem(.separator())
             switch approval.target {
             case .agent(let key):
-                let heading = NSMenuItem(title: "Duration, from Now", action: nil, keyEquivalent: "")
-                heading.isEnabled = false
-                submenu.addItem(heading)
-                for (label, until) in Self.durations() {
-                    let item = NSMenuItem(title: label, action: #selector(changeDuration(_:)), keyEquivalent: "")
-                    item.target = self
-                    item.representedObject = DurationChange(key: key, title: approval.title, label: label, until: until)
+                let duration = NSMenu()
+                duration.autoenablesItems = false
+                let now = Date()
+                for lifetime in ApprovalLifetime.allCases {
+                    let until = lifetime.expiry(from: now)
+                    let item = amendItem(lifetime.label + (lifetime == .day ? ", from Now" : ""),
+                                         Amend(key: key, title: approval.title, change: lifetime.label.lowercased(), expiresAt: until))
                     // Checked when the current expiry is what this choice would set now.
                     if let current = approval.expiresAt {
-                        let matches = until >= ApprovalStore.forever ? current >= ApprovalStore.forever
+                        let matches = lifetime == .forever ? current >= ApprovalStore.forever
                             : abs(current.timeIntervalSince(until)) <= 5 * 60
                         item.state = matches ? .on : .off
                     }
-                    submenu.addItem(item)
+                    duration.addItem(item)
                 }
+                submenu.addItem(withTitle: "Duration", action: nil, keyEquivalent: "").submenu = duration
+                let reach = NSMenu()
+                reach.autoenablesItems = false
+                let narrowTo = key.audience == .allAgents ? approval.grantedTo : key.audience
+                let session = amendItem("This Session", Amend(key: key, title: approval.title, change: "this session only",
+                                                              audience: narrowTo))
+                session.state = key.audience == .allAgents ? .off : .on
+                // An all-agents approval granted on a phone or before this was recorded has no session to narrow to.
+                session.isEnabled = narrowTo != nil
+                let all = amendItem("All Agents", Amend(key: key, title: approval.title, change: "all agents", audience: .allAgents))
+                all.state = key.audience == .allAgents ? .on : .off
+                [session, all].forEach(reach.addItem)
+                submenu.addItem(withTitle: "For", action: nil, keyEquivalent: "").submenu = reach
                 submenu.addItem(.separator())
                 submenu.addItem(actionItem("Revoke This Approval", .one(approval.target)))
-                submenu.addItem(actionItem("Revoke Everything for This Session", .session(approval.target)))
+                if key.audience != .allAgents {
+                    submenu.addItem(actionItem("Revoke Everything for This Session", .session(approval.target)))
+                }
             case .terminal:
-                submenu.addItem(actionItem("Revoke This Tab's Access", .one(approval.target)))
+                submenu.addItem(actionItem("Revoke This Terminal Tab's Access", .one(approval.target)))
             }
             item.submenu = submenu
             approvalItems.append(item)
@@ -131,27 +146,30 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         for (offset, item) in approvalItems.enumerated() { menu.insertItem(item, at: anchor + offset) }
     }
 
-    private final class DurationChange: NSObject {
-        let key: ApprovalKey, title: String, label: String, until: Date
-        init(key: ApprovalKey, title: String, label: String, until: Date) {
-            (self.key, self.title, self.label, self.until) = (key, title, label, until)
+    /// A change to one approval's expiry or audience.
+    private final class Amend: NSObject {
+        let key: ApprovalKey, title: String
+        /// Completes "change access to “title” to …".
+        let change: String
+        let audience: ApprovalAudience?, expiresAt: Date?
+        init(key: ApprovalKey, title: String, change: String, audience: ApprovalAudience? = nil, expiresAt: Date? = nil) {
+            (self.key, self.title, self.change, self.audience, self.expiresAt) = (key, title, change, audience, expiresAt)
         }
     }
 
-    private static func durations() -> [(String, Date)] {
-        let now = Date()
-        return [("1 Hour", now.addingTimeInterval(3600)),
-                ("7 Days", now.addingTimeInterval(ApprovalStore.defaultTTL)),
-                ("3 Months", now.addingTimeInterval(90 * 24 * 3600)),
-                ("Forever", ApprovalStore.forever)]
+    private func amendItem(_ title: String, _ amend: Amend) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(amend(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = amend
+        return item
     }
 
-    /// The expiry is signed. The daemon re-signs with the context from your latest Touch ID
-    /// approval; only when it has none (e.g. after a restart) does this ask for Touch ID, via
-    /// the system sheet since menus can't host the inline glyph.
-    @objc private func changeDuration(_ sender: NSMenuItem) {
-        guard let change = sender.representedObject as? DurationChange else { return }
-        switch daemon.changeExpiry(change.key, to: change.until) {
+    /// The expiry and audience are signed. The daemon re-signs with the context from your
+    /// latest Touch ID approval; only when it has none (e.g. after a restart) does this ask
+    /// for Touch ID, via the system sheet since menus can't host the inline glyph.
+    @objc private func amend(_ sender: NSMenuItem) {
+        guard let change = sender.representedObject as? Amend else { return }
+        switch daemon.amend(change.key, audience: change.audience, expiresAt: change.expiresAt) {
         case .changed:
             lastError = nil
             render()
@@ -160,11 +178,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             render()
         case .needsTouchID:
             let context = LAContext()
-            let reason = "change access to “\(change.title)” to \(change.label.lowercased())"
+            let reason = "change access to “\(change.title)” to \(change.change)"
             context.evaluateAccessControl(EnclaveSigner.accessControl(), operation: .useKeySign, localizedReason: reason) { ok, _ in
                 DispatchQueue.main.async { [self] in
                     guard ok else { return }
-                    if case .failed(let reason) = daemon.changeExpiry(change.key, to: change.until, context: context) {
+                    if case .failed(let reason) = daemon.amend(change.key, audience: change.audience, expiresAt: change.expiresAt,
+                                                               context: context) {
                         lastError = "Change failed: \(reason)"
                     }
                     render()

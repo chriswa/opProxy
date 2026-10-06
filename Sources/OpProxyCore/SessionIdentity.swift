@@ -2,11 +2,10 @@ import Darwin
 import Foundation
 
 /// The agent process a request really comes from: the nearest ancestor of the caller that is
-/// a genuinely signed agent binary. Approvals are bound to that process (`agentInstance`),
-/// which a caller can't forge. The session ID can't be verified (it lives only in the tool
-/// shell's environment, which `exec env …` can rewrite and macOS won't reveal for /bin/zsh),
-/// so it is taken as claimed; a forged one only ever matches approvals made inside the same
-/// agent process.
+/// a genuinely signed agent binary. The session ID can't be verified (it lives only in the
+/// tool shell's environment, which `exec env …` can rewrite and macOS won't reveal for
+/// /bin/zsh), so it is taken as claimed. An agent that claims none is identified by its
+/// process (`agentInstance`), which a caller can't forge.
 public struct SessionIdentity: Equatable {
     public let agent: AgentKind
     public let agentPid: pid_t

@@ -1,22 +1,71 @@
 import Foundation
 
-/// What an approval covers: one agent session, in one running agent process, running one
-/// exact `op` command line. `env` holds the forwarded `OP_*` variables, since e.g.
-/// `OP_ACCOUNT` changes what the same argv reads.
+/// Which agents an approval covers.
+public enum ApprovalAudience: Codable, Hashable {
+    /// One agent session, by the ID it claims. A resumed session keeps its ID, so it's
+    /// covered too.
+    case session(agent: AgentKind, sessionId: String)
+    /// One agent process (`SessionIdentity.agentInstance`), for an agent that doesn't name
+    /// its session.
+    case process(agent: AgentKind, instance: String)
+    /// Every genuine agent, of any kind, including ones started later.
+    case allAgents
+
+    public var sessionId: String? {
+        if case .session(_, let id) = self { return id }
+        return nil
+    }
+
+    /// "claude:<session ID>", for logs.
+    public var logName: String {
+        switch self {
+        case .session(let agent, let id): return "\(agent.rawValue):\(id)"
+        case .process(let agent, _): return "\(agent.rawValue):unknown"
+        case .allAgents: return "all-agents"
+        }
+    }
+}
+
+/// What an approval covers: one exact `op` command line, for `audience`. `env` holds the
+/// forwarded `OP_*` variables, since e.g. `OP_ACCOUNT` changes what the same argv reads.
 public struct ApprovalKey: Codable, Hashable {
-    public let agent: AgentKind
-    public let sessionId: String
-    /// `SessionIdentity.agentInstance`: a resumed session is a new process and re-prompts.
-    public let agentInstance: String
+    public let audience: ApprovalAudience
     public let argv: [String]
     public let env: [String: String]
 
-    public init(agent: AgentKind, sessionId: String, agentInstance: String, argv: [String], env: [String: String]) {
-        self.agent = agent
-        self.sessionId = sessionId
-        self.agentInstance = agentInstance
+    public init(audience: ApprovalAudience, argv: [String], env: [String: String]) {
+        self.audience = audience
         self.argv = argv
         self.env = env
+    }
+
+    /// The same command for another audience.
+    public func reaching(_ audience: ApprovalAudience) -> ApprovalKey {
+        ApprovalKey(audience: audience, argv: argv, env: env)
+    }
+
+    /// Whether an approval under this key lets `request` (a requester's own key) run.
+    public func covers(_ request: ApprovalKey) -> Bool {
+        argv == request.argv && env == request.env && (audience == .allAgents || audience == request.audience)
+    }
+}
+
+/// How long a lasting approval runs.
+public enum ApprovalLifetime: String, CaseIterable {
+    case day, forever
+
+    public var label: String {
+        switch self {
+        case .day: return "1 Day"
+        case .forever: return "Forever"
+        }
+    }
+
+    public func expiry(from approvedAt: Date) -> Date {
+        switch self {
+        case .day: return approvedAt.addingTimeInterval(24 * 60 * 60)
+        case .forever: return ApprovalStore.forever
+        }
     }
 }
 
@@ -26,6 +75,9 @@ public struct Approval: Codable, Equatable {
     public let expiresAt: Date
     /// Spaceterm title at approval time, for `opProxy list` and the menu. Display only, so unsigned.
     public let sessionLabel: String?
+    /// The requester whose dialog granted an all-agents approval, so the menu can narrow it
+    /// back to them. Display only, so unsigned: narrowing never grants more than the entry did.
+    public let grantedTo: ApprovalAudience?
     /// The item's name as the dialog showed it. Display only, so unsigned.
     public let itemLabel: String?
     /// Signature over `signedPayload`, made with the Touch ID-gated approval key.
@@ -34,12 +86,13 @@ public struct Approval: Codable, Equatable {
     /// phone's signed statement, whose challenge commits to `signedPayload`.
     public let deviceProof: DeviceProof?
 
-    init(key: ApprovalKey, approvedAt: Date, expiresAt: Date, sessionLabel: String?, itemLabel: String?,
-         signature: Data?, deviceProof: DeviceProof? = nil) {
+    init(key: ApprovalKey, approvedAt: Date, expiresAt: Date, sessionLabel: String?, grantedTo: ApprovalAudience?,
+         itemLabel: String?, signature: Data?, deviceProof: DeviceProof? = nil) {
         self.key = key
         self.approvedAt = approvedAt
         self.expiresAt = expiresAt
         self.sessionLabel = sessionLabel
+        self.grantedTo = grantedTo
         self.itemLabel = itemLabel
         self.signature = signature
         self.deviceProof = deviceProof
@@ -54,7 +107,7 @@ public struct Approval: Codable, Equatable {
     /// ISO 8601 file won't match.
     public static func payload(key: ApprovalKey, approvedAt: Date, expiresAt: Date) -> Data {
         struct Signed: Encodable {
-            let version = 1
+            let version = 2
             let key: ApprovalKey
             let approvedAt: Date
             let expiresAt: Date
@@ -68,21 +121,17 @@ public struct Approval: Codable, Equatable {
 /// Mac's approval key or, when approved on a phone, carries that phone's proof instead.
 /// Not thread-safe: the daemon uses it from one queue.
 public final class ApprovalStore {
-    public static let defaultTTL: TimeInterval = 7 * 24 * 60 * 60
-
     private let url: URL
-    private let ttl: TimeInterval
     private let now: () -> Date
     private let verify: (_ payload: Data, _ signature: Data) -> Bool
     private let verifyDevice: (Approval) -> Bool
     private var approvals: [Approval] = []
     private var loadedModification: Date?
 
-    public init(url: URL, ttl: TimeInterval = ApprovalStore.defaultTTL, now: @escaping () -> Date = Date.init,
+    public init(url: URL, now: @escaping () -> Date = Date.init,
                 verify: @escaping (_ payload: Data, _ signature: Data) -> Bool,
                 verifyDevice: @escaping (Approval) -> Bool = { _ in false }) {
         self.url = url
-        self.ttl = ttl
         self.now = now
         self.verify = verify
         self.verifyDevice = verifyDevice
@@ -117,50 +166,60 @@ public final class ApprovalStore {
         return approvals.filter { $0.expiresAt > t && !isValid($0) }
     }
 
-    public func isApproved(_ key: ApprovalKey) -> Bool {
+    /// Whether `request`, a requester's own key, may run: approved for its audience or for
+    /// all agents.
+    public func isApproved(_ request: ApprovalKey) -> Bool {
         reloadIfChanged()
         let t = now()
-        return approvals.contains { $0.key == key && $0.expiresAt > t && isValid($0) }
+        return approvals.contains { $0.key.covers(request) && $0.expiresAt > t && isValid($0) }
     }
 
-    /// `sign` receives the payload to sign; see `Approval.signedPayload`. `ttl` overrides the
-    /// store's default lifetime.
-    public func approve(_ key: ApprovalKey, sessionLabel: String?, itemLabel: String? = nil, ttl: TimeInterval? = nil,
-                        sign: (Data) throws -> Data) throws {
+    /// Approves `key` from now for `lifetime`. `sign` receives the payload to sign; see
+    /// `Approval.signedPayload`.
+    public func approve(_ key: ApprovalKey, lifetime: ApprovalLifetime, sessionLabel: String?,
+                        grantedTo: ApprovalAudience? = nil, itemLabel: String? = nil, sign: (Data) throws -> Data) throws {
         reloadIfChanged()
         // Whole seconds, so the payload re-derived from the ISO 8601 file matches.
         let t = Date(timeIntervalSince1970: now().timeIntervalSince1970.rounded(.down))
-        let expires = t.addingTimeInterval(ttl ?? self.ttl)
+        let expires = lifetime.expiry(from: t)
         let signature = try sign(Approval.payload(key: key, approvedAt: t, expiresAt: expires))
-        approvals.removeAll { $0.key == key || $0.expiresAt <= t }
-        approvals.append(Approval(key: key, approvedAt: t, expiresAt: expires, sessionLabel: sessionLabel,
-                                  itemLabel: itemLabel, signature: signature))
+        store(Approval(key: key, approvedAt: t, expiresAt: expires, sessionLabel: sessionLabel, grantedTo: grantedTo,
+                       itemLabel: itemLabel, signature: signature))
         try save()
     }
 
     /// Records an approval given on a paired phone. Its times are the ones the phone's grant
     /// committed to (see `DeviceProofCheck`), so they're taken as given rather than from now.
-    public func approve(_ key: ApprovalKey, sessionLabel: String?, itemLabel: String?, approvedAt: Date, expiresAt: Date,
-                        proof: DeviceProof) throws {
+    public func approve(_ key: ApprovalKey, sessionLabel: String?, grantedTo: ApprovalAudience? = nil, itemLabel: String?,
+                        approvedAt: Date, expiresAt: Date, proof: DeviceProof) throws {
         reloadIfChanged()
-        let t = now()
-        approvals.removeAll { $0.key == key || $0.expiresAt <= t }
-        approvals.append(Approval(key: key, approvedAt: approvedAt, expiresAt: expiresAt, sessionLabel: sessionLabel,
-                                  itemLabel: itemLabel, signature: nil, deviceProof: proof))
+        store(Approval(key: key, approvedAt: approvedAt, expiresAt: expiresAt, sessionLabel: sessionLabel,
+                       grantedTo: grantedTo, itemLabel: itemLabel, signature: nil, deviceProof: proof))
         try save()
     }
 
-    /// Re-signs an existing approval with a new expiry, keeping when it was first approved and
-    /// its labels. The new signature is the Mac's, so a phone's proof is dropped. Returns false if there is no such active approval.
+    /// Replaces any entry for the same key, and drops narrower entries an all-agents one covers.
+    private func store(_ approval: Approval) {
+        approvals.removeAll { approval.key.covers($0.key) && $0.expiresAt <= approval.expiresAt }
+        approvals.removeAll { $0.key == approval.key }
+        approvals.append(approval)
+    }
+
+    /// Re-signs an existing approval with a new audience and/or expiry, keeping when it was
+    /// first approved and its labels. The new signature is the Mac's, so a phone's proof is
+    /// dropped. Returns false if there is no such active approval.
     @discardableResult
-    public func changeExpiry(_ key: ApprovalKey, to expiresAt: Date, sign: (Data) throws -> Data) throws -> Bool {
+    public func amend(_ key: ApprovalKey, audience: ApprovalAudience? = nil, expiresAt: Date? = nil,
+                      sign: (Data) throws -> Data) throws -> Bool {
         reloadIfChanged()
         guard let existing = active.first(where: { $0.key == key }) else { return false }
-        let expires = Date(timeIntervalSince1970: expiresAt.timeIntervalSince1970.rounded(.down))
-        let signature = try sign(Approval.payload(key: key, approvedAt: existing.approvedAt, expiresAt: expires))
+        let newKey = audience.map(key.reaching) ?? key
+        let expires = Date(timeIntervalSince1970: (expiresAt ?? existing.expiresAt).timeIntervalSince1970.rounded(.down))
+        let signature = try sign(Approval.payload(key: newKey, approvedAt: existing.approvedAt, expiresAt: expires))
         approvals.removeAll { $0.key == key }
-        approvals.append(Approval(key: key, approvedAt: existing.approvedAt, expiresAt: expires,
-                                  sessionLabel: existing.sessionLabel, itemLabel: existing.itemLabel, signature: signature))
+        store(Approval(key: newKey, approvedAt: existing.approvedAt, expiresAt: expires, sessionLabel: existing.sessionLabel,
+                       grantedTo: newKey.audience == .allAgents ? existing.grantedTo ?? key.audience : nil,
+                       itemLabel: existing.itemLabel, signature: signature))
         try save()
         return true
     }
@@ -171,7 +230,7 @@ public final class ApprovalStore {
         guard let i = approvals.firstIndex(where: { $0.key == key }) else { return }
         let a = approvals[i]
         approvals[i] = Approval(key: a.key, approvedAt: a.approvedAt, expiresAt: a.expiresAt, sessionLabel: a.sessionLabel,
-                                itemLabel: label, signature: a.signature, deviceProof: a.deviceProof)
+                                grantedTo: a.grantedTo, itemLabel: label, signature: a.signature, deviceProof: a.deviceProof)
         try save()
     }
 

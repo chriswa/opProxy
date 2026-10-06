@@ -92,9 +92,10 @@ final class ApprovalFeed {
             var hashes: [String: String] = [:]
             if case .agent(let key) = prompt.key {
                 for option in options {
-                    guard let expiresAt = ApprovalOptions.expiry(of: option, from: approvedAt) else { continue }
+                    guard case .lasting(let lifetime, _) = option.scope, let stored = option.scope.storedKey(for: key) else { continue }
+                    let expiresAt = lifetime.expiry(from: approvedAt)
                     grants[option.id] = (approvedAt, expiresAt)
-                    hashes[option.id] = sha256Hex(Approval.payload(key: key, approvedAt: approvedAt, expiresAt: expiresAt))
+                    hashes[option.id] = sha256Hex(Approval.payload(key: stored, approvedAt: approvedAt, expiresAt: expiresAt))
                 }
             }
             let challenge = ApprovalChallenge(nonce: Self.random(18), picker: RemoteCard.picker, grants: hashes)
@@ -180,7 +181,7 @@ final class ApprovalFeed {
         case "deny":
             decision = .denied
         case "approve":
-            guard let option = item.options.first(where: { $0.id == pick }) else { return "Choose how long to allow." }
+            guard let option = item.options.first(where: { $0.id == pick }) else { return "Choose what to allow." }
             let proof = DeviceProof(keyId: keyId, statement: text, signature: signature)
             decision = .approved(.device(proof, grant: item.grants[option.id]), option.scope)
         default:

@@ -78,6 +78,9 @@ enum DialogPreview {
              #"export DEPLOY_KEY=$(op read 'op://Private/a8d2f6g1h9j4k7l3m5n0p2q6rs/password')"# + "\n" + #"curl -s https://api.example.com/v1/sessions -H "Authorization: Bearer $DEPLOY_KEY" | jq '.sessions[] | {session_id, status_enum, title}' | head -40"#,
              "The release build failed again. Next I'll list recent deploys to find the one that ran the migration, then read its log.\n\nIf that deploy is gone I'll fall back to the build logs API.",
              "Deploy key"),
+            ("forever-all", ["read", "op://Private/Chat webhook/credential"],
+             #"CHAT_TOKEN=$(op read "op://Private/Chat webhook/credential") ./post-summary.sh"#,
+             "Posting the summary to #team-updates.", nil),
             ("minimal", ["document", "get", "prod-ssh-config", "--vault", "Engineering"], nil, nil, nil),
             ("terminal", ["item", "get", "Issue Tracker API key", "--fields", "label=credential", "--reveal"],
              nil, nil, nil),
@@ -96,7 +99,7 @@ enum DialogPreview {
                         "30112  -zsh"]),
                     surfaceId: nil, surfaceLabel: nil))
             } else {
-                key = .agent(ApprovalKey(agent: .claude, sessionId: session.sessionId, agentInstance: "preview", argv: argv, env: [:]))
+                key = .agent(ApprovalKey(audience: .session(agent: .claude, sessionId: session.sessionId), argv: argv, env: [:]))
                 requester = .agent(AgentRequester(session: session, sessionLabel: "opProxy menu bar + hardening",
                                                   caller: CallerContext(toolCommand: tool, viaProcess: nil),
                                                   lastMessage: message, agentPid: 26441))
@@ -108,6 +111,7 @@ enum DialogPreview {
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
                 let view = ApprovalView(prompt: prompt, actions: nil, authContext: nil)
                 if name == "read-by-id" { view.setWaiting(2) }
+                if name == "forever-all" { view.choose(.forever, .allAgents) }
                 view.setRemaining(name == "minimal" ? 14 : 87)
                 if name == "minimal" { view.showAbandoned() }
                 try? view.copyText.write(to: dir.appendingPathComponent("dialog-\(name).txt"), atomically: true, encoding: .utf8)

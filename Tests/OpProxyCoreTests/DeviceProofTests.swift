@@ -6,9 +6,9 @@ final class DeviceProofTests: XCTestCase {
     var dir: URL!
     var devices: PairedDeviceStore!
     let phone = P256.Signing.PrivateKey()
-    let key = ApprovalKey(agent: .claude, sessionId: "s", agentInstance: "10@1", argv: ["read", "op://a/b/c"], env: [:])
+    let key = ApprovalKey(audience: .session(agent: .claude, sessionId: "s"), argv: ["read", "op://a/b/c"], env: [:])
     let approvedAt = Date(timeIntervalSince1970: 1_000_000)
-    var week: Date { approvedAt.addingTimeInterval(7 * 86400) }
+    var day: Date { ApprovalLifetime.day.expiry(from: approvedAt) }
 
     override func setUpWithError() throws {
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("devices-\(UUID())")
@@ -20,16 +20,20 @@ final class DeviceProofTests: XCTestCase {
 
     var keyId: String { DeviceKey.keyId(rawPublicKey: phone.publicKey.rawRepresentation) }
 
-    /// The challenge the feed would publish: grants for 7 days and forever from `approvedAt`.
+    /// The challenge the feed would publish: grants for a day and forever from `approvedAt`,
+    /// for this session and for all agents.
     var challenge: String {
-        func grant(_ expires: Date) -> String {
+        func grant(_ key: ApprovalKey, _ expires: Date) -> String {
             sha256Hex(Approval.payload(key: key, approvedAt: approvedAt, expiresAt: expires))
         }
-        return ApprovalChallenge(nonce: "n", picker: "duration",
-                                 grants: ["7d": grant(week), "forever": grant(ApprovalStore.forever)]).encoded
+        let all = key.reaching(.allAgents)
+        return ApprovalChallenge(nonce: "n", picker: "duration", grants: [
+            "1d": grant(key, day), "forever": grant(key, ApprovalStore.forever),
+            "1d-all": grant(all, day), "forever-all": grant(all, ApprovalStore.forever),
+        ]).encoded
     }
 
-    func proof(pick: String = "7d", action: String = "approve", signer: P256.Signing.PrivateKey? = nil,
+    func proof(pick: String = "1d", action: String = "approve", signer: P256.Signing.PrivateKey? = nil,
                edit: (String) -> String = { $0 }) throws -> DeviceProof {
         let statement = ApprovalStatement(id: "item", revision: 1, challenge: challenge, documentSha256: "d", action: action,
                                           picks: ["duration": pick], keyId: keyId, signedAt: 1)
@@ -47,8 +51,9 @@ final class DeviceProofTests: XCTestCase {
                       verifyDevice: { [devices] in DeviceProofCheck.verify($0, device: devices!.device(keyId:)) })
     }
 
-    func approve(expiresAt: Date? = nil, _ proof: DeviceProof) throws -> Bool {
-        try store().approve(key, sessionLabel: nil, itemLabel: nil, approvedAt: approvedAt, expiresAt: expiresAt ?? week, proof: proof)
+    func approve(storing stored: ApprovalKey? = nil, expiresAt: Date? = nil, _ proof: DeviceProof) throws -> Bool {
+        try store().approve(stored ?? key, sessionLabel: nil, itemLabel: nil, approvedAt: approvedAt, expiresAt: expiresAt ?? day,
+                            proof: proof)
         return store().isApproved(key)
     }
 
@@ -73,8 +78,15 @@ final class DeviceProofTests: XCTestCase {
     }
 
     func testDurationCantBeUpgraded() throws {
-        XCTAssertFalse(try approve(proof(pick: "once")), "a 7-day entry backed by a statement that picked once")
-        XCTAssertFalse(try approve(expiresAt: ApprovalStore.forever, proof(pick: "7d")), "picked 7 days, stored forever")
+        XCTAssertFalse(try approve(proof(pick: "once")), "a 1-day entry backed by a statement that picked once")
+        XCTAssertFalse(try approve(expiresAt: ApprovalStore.forever, proof(pick: "1d")), "picked 1 day, stored forever")
+    }
+
+    func testReachCantBeWidened() throws {
+        let all = key.reaching(.allAgents)
+        XCTAssertFalse(try approve(storing: all, proof(pick: "1d")), "picked this agent, stored for all agents")
+        XCTAssertTrue(try approve(storing: all, proof(pick: "1d-all")))
+        XCTAssertTrue(try approve(storing: all, expiresAt: ApprovalStore.forever, proof(pick: "forever-all")))
     }
 
     func testDenyGrantsNothing() throws {
@@ -92,9 +104,8 @@ final class DeviceProofTests: XCTestCase {
         try rewrite { $0["expiresAt"] = "2099-01-01T00:00:00Z" }
         XCTAssertFalse(store().isApproved(key), "extended expiry")
         try original.write(to: url)
-        try rewrite { e in var k = e["key"] as! [String: Any]; k["sessionId"] = "victim"; e["key"] = k }
-        let victim = ApprovalKey(agent: .claude, sessionId: "victim", agentInstance: key.agentInstance, argv: key.argv, env: [:])
-        XCTAssertFalse(store().isApproved(victim), "moved to another session")
+        try rewrite { e in var k = e["key"] as! [String: Any]; k["audience"] = ["session": ["agent": "claude", "sessionId": "victim"]]; e["key"] = k }
+        XCTAssertFalse(store().isApproved(key.reaching(.session(agent: .claude, sessionId: "victim"))), "moved to another session")
     }
 
     func testPairedDevicesMustBeSigned() throws {

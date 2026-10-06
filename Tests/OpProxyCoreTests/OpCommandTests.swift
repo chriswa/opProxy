@@ -163,7 +163,7 @@ final class ApprovalStoreTests: XCTestCase {
     }
     override func tearDown() { try? FileManager.default.removeItem(at: url) }
 
-    let key = ApprovalKey(agent: .claude, sessionId: "s", agentInstance: "10@1", argv: ["read", "op://a/b/c"], env: [:])
+    let key = ApprovalKey(audience: .session(agent: .claude, sessionId: "s"), argv: ["read", "op://a/b/c"], env: [:])
     // Stand-in for the Secure Enclave signature: a keyed hash only the test knows.
     static func fakeSign(_ d: Data) -> Data { Data((d + Data("secret".utf8)).reversed()) }
     static let fakeVerify: (Data, Data) -> Bool = { fakeSign($0) == $1 }
@@ -171,66 +171,84 @@ final class ApprovalStoreTests: XCTestCase {
         ApprovalStore(url: url, now: now, verify: Self.fakeVerify)
     }
 
-    func testExactKeyAndTTL() throws {
+    func variant(_ audience: ApprovalAudience = .session(agent: .claude, sessionId: "s"), argv: [String]? = nil,
+                 env: [String: String] = [:]) -> ApprovalKey {
+        ApprovalKey(audience: audience, argv: argv ?? key.argv, env: env)
+    }
+
+    func testExactKeyAndDay() throws {
         var now = Date(timeIntervalSince1970: 1_000_000)
         let store = store(now: { now })
         XCTAssertFalse(store.isApproved(key))
-        try store.approve(key, sessionLabel: "t", sign: Self.fakeSign)
+        try store.approve(key, lifetime: .day, sessionLabel: "t", sign: Self.fakeSign)
         XCTAssertTrue(store.isApproved(key))
-        func variant(agent: AgentKind = .claude, session: String = "s", instance: String = "10@1",
-                     argv: [String]? = nil, env: [String: String] = [:]) -> ApprovalKey {
-            ApprovalKey(agent: agent, sessionId: session, agentInstance: instance, argv: argv ?? key.argv, env: env)
-        }
-        XCTAssertTrue(store.isApproved(variant()))
-        XCTAssertFalse(store.isApproved(variant(session: "other")))
-        XCTAssertFalse(store.isApproved(variant(instance: "11@1")), "same session ID from another agent process")
-        XCTAssertFalse(store.isApproved(variant(instance: "10@2")), "PID reused by a new process")
+        XCTAssertTrue(store.isApproved(variant()), "same session ID, e.g. resumed in a new process")
+        XCTAssertFalse(store.isApproved(variant(.session(agent: .claude, sessionId: "other"))))
+        XCTAssertFalse(store.isApproved(variant(.session(agent: .codex, sessionId: "s"))))
+        XCTAssertFalse(store.isApproved(variant(.process(agent: .claude, instance: "10@1"))))
         XCTAssertFalse(store.isApproved(variant(argv: key.argv + ["-n"])))
         XCTAssertFalse(store.isApproved(variant(env: ["OP_ACCOUNT": "x"])))
-        XCTAssertFalse(store.isApproved(variant(agent: .codex)))
 
-        now += ApprovalStore.defaultTTL - 1
+        now += 24 * 3600 - 1
         XCTAssertTrue(self.store(now: { now }).isApproved(key), "persists across instances")
         now += 2
-        XCTAssertFalse(store.isApproved(key), "expires after 7 days")
+        XCTAssertFalse(store.isApproved(key), "expires after a day")
     }
 
-    func testCustomLifetime() throws {
-        var now = Date(timeIntervalSince1970: 1_000_000)
-        let store = store(now: { now })
-        try store.approve(key, sessionLabel: nil, itemLabel: "Item", ttl: 3600, sign: Self.fakeSign)
-        XCTAssertEqual(store.active.first?.itemLabel, "Item")
-        now += 3599
+    func testAllAgentsCoversEveryAudienceForThatCommandOnly() throws {
+        let store = store()
+        try store.approve(key.reaching(.allAgents), lifetime: .forever, sessionLabel: nil, grantedTo: key.audience,
+                          sign: Self.fakeSign)
         XCTAssertTrue(store.isApproved(key))
-        now += 2
-        XCTAssertFalse(store.isApproved(key), "a 1-hour approval lapses after an hour")
+        XCTAssertTrue(store.isApproved(variant(.session(agent: .codex, sessionId: "x"))))
+        XCTAssertTrue(store.isApproved(variant(.process(agent: .cursor, instance: "1@1"))))
+        XCTAssertFalse(store.isApproved(variant(argv: key.argv + ["-n"])))
+        XCTAssertFalse(store.isApproved(variant(.session(agent: .codex, sessionId: "x"), env: ["OP_ACCOUNT": "x"])))
+        XCTAssertEqual(store.active.first?.grantedTo, key.audience)
     }
 
-    func testChangeExpiryResignsAndKeepsApprovalTime() throws {
+    func testWideningReplacesTheNarrowerEntry() throws {
+        let store = store()
+        try store.approve(key, lifetime: .day, sessionLabel: nil, sign: Self.fakeSign)
+        try store.approve(key.reaching(.allAgents), lifetime: .forever, sessionLabel: nil, sign: Self.fakeSign)
+        XCTAssertEqual(store.active.map(\.key.audience), [.allAgents])
+    }
+
+    func testAmendResignsAndKeepsApprovalTime() throws {
         var now = Date(timeIntervalSince1970: 1_000_000)
         let store = store(now: { now })
-        try store.approve(key, sessionLabel: "s", itemLabel: "Item", ttl: 3600, sign: Self.fakeSign)
+        try store.approve(key, lifetime: .day, sessionLabel: "s", itemLabel: "Item", sign: Self.fakeSign)
         let approvedAt = try XCTUnwrap(store.active.first?.approvedAt)
         now += 60
-        XCTAssertTrue(try store.changeExpiry(key, to: ApprovalStore.forever, sign: Self.fakeSign))
+        XCTAssertTrue(try store.amend(key, expiresAt: ApprovalStore.forever, sign: Self.fakeSign))
         now += 30 * 24 * 3600
-        XCTAssertTrue(store.isApproved(key), "extended well past the original hour")
+        XCTAssertTrue(store.isApproved(key), "extended well past the original day")
         XCTAssertEqual(store.active.first?.approvedAt, approvedAt)
         XCTAssertEqual(store.active.first?.itemLabel, "Item")
-        let other = ApprovalKey(agent: .codex, sessionId: "x", agentInstance: "1@1", argv: [], env: [:])
-        XCTAssertFalse(try store.changeExpiry(other, to: ApprovalStore.forever, sign: Self.fakeSign))
+        XCTAssertFalse(try store.amend(variant(.session(agent: .codex, sessionId: "x")), expiresAt: ApprovalStore.forever,
+                                       sign: Self.fakeSign))
+
+        // Widen to all agents, then narrow back to the session that asked.
+        let codex = variant(.session(agent: .codex, sessionId: "x"))
+        XCTAssertTrue(try store.amend(key, audience: .allAgents, sign: Self.fakeSign))
+        XCTAssertTrue(store.isApproved(codex))
+        XCTAssertEqual(store.active.first?.grantedTo, key.audience)
+        XCTAssertTrue(try store.amend(key.reaching(.allAgents), audience: key.audience, sign: Self.fakeSign))
+        XCTAssertFalse(store.isApproved(codex))
+        XCTAssertTrue(store.isApproved(key))
+        XCTAssertEqual(store.active.first?.approvedAt, approvedAt)
     }
 
     func testRevokeFromAnotherInstanceIsSeen() throws {
         let daemonStore = store()
-        try daemonStore.approve(key, sessionLabel: nil, sign: Self.fakeSign)
+        try daemonStore.approve(key, lifetime: .day, sessionLabel: nil, sign: Self.fakeSign)
         Thread.sleep(forTimeInterval: 0.01)
-        XCTAssertEqual(try store().revoke { $0.key.sessionId == "s" }, 1)
+        XCTAssertEqual(try store().revoke { $0.key.audience.sessionId == "s" }, 1)
         XCTAssertFalse(daemonStore.isApproved(key))
     }
 
     func testTamperedEntriesAreIgnored() throws {
-        try store().approve(key, sessionLabel: nil, sign: Self.fakeSign)
+        try store().approve(key, lifetime: .day, sessionLabel: nil, sign: Self.fakeSign)
         func rewrite(_ edit: (inout [String: Any]) -> Void) throws {
             var entries = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [[String: Any]]
             edit(&entries[0])
@@ -238,15 +256,19 @@ final class ApprovalStoreTests: XCTestCase {
         }
         XCTAssertTrue(store().isApproved(key))
 
-        // Replay onto another session.
-        try rewrite { e in var k = e["key"] as! [String: Any]; k["sessionId"] = "victim"; e["key"] = k }
-        let victim = ApprovalKey(agent: .claude, sessionId: "victim", agentInstance: key.agentInstance, argv: key.argv, env: [:])
-        XCTAssertFalse(store().isApproved(victim))
+        // Replay onto another session, or widen to all agents.
+        try rewrite { e in var k = e["key"] as! [String: Any]; k["audience"] = ["session": ["agent": "claude", "sessionId": "victim"]]; e["key"] = k }
+        XCTAssertFalse(store().isApproved(variant(.session(agent: .claude, sessionId: "victim"))))
+        XCTAssertEqual(store().rejected.count, 1)
+        try store().revoke { _ in true }
+        try store().approve(key, lifetime: .day, sessionLabel: nil, sign: Self.fakeSign)
+        try rewrite { e in var k = e["key"] as! [String: Any]; k["audience"] = ["allAgents": [String: Any]()]; e["key"] = k }
+        XCTAssertFalse(store().isApproved(key))
         XCTAssertEqual(store().rejected.count, 1)
 
         // Forged entry with no signature, and one with an extended expiry.
         try store().revoke { _ in true }
-        try store().approve(key, sessionLabel: nil, sign: Self.fakeSign)
+        try store().approve(key, lifetime: .day, sessionLabel: nil, sign: Self.fakeSign)
         try rewrite { e in e["expiresAt"] = "2099-01-01T00:00:00Z" }
         XCTAssertFalse(store().isApproved(key))
         try rewrite { e in e["signature"] = nil }

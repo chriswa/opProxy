@@ -3,17 +3,37 @@ import Foundation
 import LocalAuthentication
 import OpProxyCore
 
-/// How long an approval lasts, as chosen in the dialog.
+/// Which agents a lasting approval covers, as chosen in the dialog.
+enum ApprovalReach: CaseIterable {
+    /// The asking agent's session (or its process, when it names no session).
+    case thisAgent
+    case allAgents
+
+    var label: String {
+        switch self {
+        case .thisAgent: return "This agent"
+        case .allAgents: return "All agents"
+        }
+    }
+}
+
+/// What an approval grants, as chosen in the dialog.
 enum ApprovalScope: Equatable {
     /// Run this request only; remember nothing.
     case once
-    /// Agents: this exact command in this agent session, for this long.
-    case lasting(TimeInterval)
+    /// Agents: this exact command, for `ApprovalReach`, for `ApprovalLifetime`.
+    case lasting(ApprovalLifetime, ApprovalReach)
     /// Terminals: every read from the tab, 1Password-style (idle timeout, 12-hour cap).
     case tab
+
+    /// The key a lasting agent approval is stored under, given the requester's own key.
+    func storedKey(for request: ApprovalKey) -> ApprovalKey? {
+        guard case .lasting(_, let reach) = self else { return nil }
+        return reach == .allAgents ? request.reaching(.allAgents) : request
+    }
 }
 
-/// One choice of how long an approval lasts. The dialog and the approval feed both offer
+/// One choice of what an approval grants. The dialog and the approval feed both offer
 /// exactly these; `id` is what a phone's statement picks.
 struct ApprovalOption {
     let id: String
@@ -24,36 +44,42 @@ struct ApprovalOption {
 }
 
 enum ApprovalOptions {
-    static let forever = "forever"
-
     static func `for`(_ requester: Requester) -> (options: [ApprovalOption], defaultIndex: Int) {
         let once = ApprovalOption(id: "once", label: "Once", scope: .once, hint: "Runs this one request and remembers nothing.")
         switch requester {
-        case .agent:
-            return ([
-                once,
-                ApprovalOption(id: "1h", label: "1 Hour", scope: .lasting(3600),
-                               hint: "Approves this exact command in this agent session for 1 hour."),
-                ApprovalOption(id: "7d", label: "7 Days", scope: .lasting(ApprovalStore.defaultTTL),
-                               hint: "Approves this exact command in this agent session for 7 days."),
-                ApprovalOption(id: "3mo", label: "3 Months", scope: .lasting(90 * 24 * 3600.0),
-                               hint: "Approves this exact command in this agent session for 3 months."),
-                ApprovalOption(id: forever, label: "Forever", scope: .lasting(ApprovalStore.forever.timeIntervalSinceNow),
-                               hint: "Approves this exact command for as long as this agent session runs."),
-            ], 2)
+        case .agent(let a):
+            let lasting = ApprovalLifetime.allCases.flatMap { lifetime in
+                ApprovalReach.allCases.map { reach in
+                    ApprovalOption(id: id(lifetime, reach), label: "\(lifetime.label) · \(reach.label)",
+                                   scope: .lasting(lifetime, reach), hint: hint(lifetime, reach, agent: a.session.agent))
+                }
+            }
+            return ([once] + lasting, 0)
         case .terminal:
             return ([
                 once,
-                ApprovalOption(id: "tab", label: "This Tab", scope: .tab,
+                ApprovalOption(id: "tab", label: "This Terminal Tab", scope: .tab,
                                hint: "Approves reads from this terminal tab until it's unused for 10 minutes (12 hours at most)."),
             ], 1)
         }
     }
 
-    /// The expiry `option` grants for an approval made at `approvedAt`; nil if it stores nothing.
-    static func expiry(of option: ApprovalOption, from approvedAt: Date) -> Date? {
-        guard case .lasting(let ttl) = option.scope else { return nil }
-        return option.id == forever ? ApprovalStore.forever : approvedAt.addingTimeInterval(ttl)
+    /// "1d", "forever-all": what a phone's statement picks.
+    private static func id(_ lifetime: ApprovalLifetime, _ reach: ApprovalReach) -> String {
+        (lifetime == .day ? "1d" : "forever") + (reach == .allAgents ? "-all" : "")
+    }
+
+    private static func hint(_ lifetime: ApprovalLifetime, _ reach: ApprovalReach, agent: AgentKind) -> String {
+        switch (lifetime, reach) {
+        case (.day, .thisAgent):
+            return "Approves this exact command in this \(agent.displayName) session for 1 day, including if the session is resumed."
+        case (.day, .allAgents):
+            return "Approves this exact command for every Claude Code, Codex and Cursor session for 1 day."
+        case (.forever, .thisAgent):
+            return "Approves this exact command in this \(agent.displayName) session until you revoke it, including if the session is resumed."
+        case (.forever, .allAgents):
+            return "Approves this exact command for every agent session until you revoke it."
+        }
     }
 }
 
@@ -80,9 +106,9 @@ enum Decision {
 
     init?(scripted: String) {
         switch scripted {
-        case "approved": self = .approved(.touchID(nil), .lasting(ApprovalStore.defaultTTL))
+        case "approved": self = .approved(.touchID(nil), .lasting(.day, .thisAgent))
         case "approved-once": self = .approved(.touchID(nil), .once)
-        case "approved-hour": self = .approved(.touchID(nil), .lasting(3600))
+        case "approved-all": self = .approved(.touchID(nil), .lasting(.forever, .allAgents))
         case "denied": self = .denied
         case "timedOut": self = .timedOut
         default: return nil
@@ -232,6 +258,18 @@ final class Daemon {
         let approvedAt: Date
         /// nil for terminal tabs, which lapse after idling.
         let expiresAt: Date?
+        /// For an all-agents approval: the requester it can be narrowed back to.
+        let grantedTo: ApprovalAudience?
+    }
+
+    /// "Claude Code “title”", "All agents".
+    private static func describe(_ a: Approval) -> String {
+        switch a.key.audience {
+        case .session(let agent, _), .process(let agent, _):
+            return agent.displayName + (a.sessionLabel.map { " “\($0)”" } ?? "")
+        case .allAgents:
+            return "All agents"
+        }
     }
 
     /// Unexpired approvals, newest first.
@@ -240,12 +278,12 @@ final class Daemon {
             let agents = store.active.map { a in
                 RecentApproval(target: .agent(a.key),
                                title: a.itemLabel ?? OpCommand(argv: a.key.argv).description.subject ?? "op " + (a.key.argv.first ?? ""),
-                               requester: a.key.agent.displayName + (a.sessionLabel.map { " “\($0)”" } ?? ""),
-                               command: "op " + a.key.argv.joined(separator: " "), approvedAt: a.approvedAt, expiresAt: a.expiresAt)
+                               requester: Self.describe(a), command: "op " + a.key.argv.joined(separator: " "),
+                               approvedAt: a.approvedAt, expiresAt: a.expiresAt, grantedTo: a.grantedTo)
             }
             let tabs = terminals.active.map { t in
                 RecentApproval(target: .terminal(t.key), title: "All reads from this terminal tab", requester: t.label,
-                               command: nil, approvedAt: t.approvedAt, expiresAt: nil)
+                               command: nil, approvedAt: t.approvedAt, expiresAt: nil, grantedTo: nil)
             }
             return Array((agents + tabs).sorted { $0.approvedAt > $1.approvedAt }.prefix(limit))
         }
@@ -253,7 +291,7 @@ final class Daemon {
 
     enum Revocation {
         case one(RecentApproval.Target)
-        /// Every approval for that agent session ID (or that terminal tab).
+        /// Every approval for that agent session (or that terminal tab).
         case session(RecentApproval.Target)
         case all
     }
@@ -265,7 +303,7 @@ final class Daemon {
                 case .one(.agent(let k)):
                     try store.revoke { $0.key == k }
                 case .session(.agent(let k)):
-                    try store.revoke { $0.key.agent == k.agent && $0.key.sessionId == k.sessionId }
+                    try store.revoke { $0.key.audience == k.audience }
                 case .one(.terminal(let k)), .session(.terminal(let k)):
                     terminals.revoke(k)
                 case .all:
@@ -278,16 +316,17 @@ final class Daemon {
         }
     }
 
-    enum ExpiryChange: Equatable {
+    enum Amendment: Equatable {
         case changed
         /// No authenticated signing context yet (e.g. right after a restart): Touch ID first.
         case needsTouchID
         case failed(String)
     }
 
-    /// Re-signs an agent approval to expire at `expiresAt`, with `context` if given (it just
-    /// passed Touch ID) or else the context kept from the latest approval.
-    func changeExpiry(_ key: ApprovalKey, to expiresAt: Date, context: LAContext? = nil) -> ExpiryChange {
+    /// Re-signs an agent approval for a new audience and/or expiry, with `context` if given (it
+    /// just passed Touch ID) or else the context kept from the latest approval.
+    func amend(_ key: ApprovalKey, audience: ApprovalAudience? = nil, expiresAt: Date? = nil,
+               context: LAContext? = nil) -> Amendment {
         stateQueue.sync {
             guard let signer else { return .failed("this build has no approval key") }
             if let context { signingContext = context }
@@ -295,10 +334,12 @@ final class Daemon {
             // Never let a stale context raise UI from inside the daemon; ask for Touch ID instead.
             signingContext.interactionNotAllowed = true
             do {
-                guard try store.changeExpiry(key, to: expiresAt, sign: { try signer.sign($0, context: signingContext) }) else {
+                guard try store.amend(key, audience: audience, expiresAt: expiresAt,
+                                      sign: { try signer.sign($0, context: signingContext) }) else {
                     return .failed("that approval has already expired or been revoked")
                 }
-                log.write("changed expiry: \(key.agent.rawValue):\(key.sessionId.prefix(8)) op \(key.argv.joined(separator: " "))")
+                log.write("amended: \(key.audience.logName) → \((audience ?? key.audience).logName)"
+                          + "\(expiresAt.map { " until \($0)" } ?? "") op \(key.argv.joined(separator: " "))")
                 return .changed
             } catch {
                 self.signingContext = nil
@@ -340,8 +381,11 @@ final class Daemon {
             let claimed = request.session.flatMap { $0.agent == identity.agent ? $0 : nil }
             let session = claimed ?? AgentSession(agent: identity.agent, sessionId: "unknown", surfaceId: request.surfaceId)
             tag = "\(session.agent.rawValue):\(session.sessionId.prefix(8)) \(command)"
-            let approvalKey = ApprovalKey(agent: session.agent, sessionId: session.sessionId,
-                                          agentInstance: identity.agentInstance, argv: request.argv, env: request.env)
+            // An agent that names no session gets its process as the audience, so nameless
+            // agents never share approvals with each other.
+            let audience: ApprovalAudience = claimed.map { .session(agent: $0.agent, sessionId: $0.sessionId) }
+                ?? .process(agent: identity.agent, instance: identity.agentInstance)
+            let approvalKey = ApprovalKey(audience: audience, argv: request.argv, env: request.env)
             key = .agent(approvalKey)
             if !plan.requiresApproval || stateQueue.sync(execute: { store.isApproved(approvalKey) }) {
                 log.write("allowed: \(tag)")
@@ -394,18 +438,21 @@ final class Daemon {
             if case .terminal(let t) = prompt.requester {
                 terminals.approve(k, label: t.info.app + (t.info.tty.map { " · \($0)" } ?? ""))
             }
-        case (.agent(let k), .lasting(let ttl)):
+        case (.agent(let k), .lasting(let lifetime, _)):
+            let stored = scope.storedKey(for: k)!
             let itemLabel = prompt.resolvedItem ?? prompt.description.subject
+            let grantedTo = stored.audience == .allAgents ? k.audience : nil
             do {
                 switch authority {
                 case .touchID(let context):
                     if let context { signingContext = context }
-                    try store.approve(k, sessionLabel: prompt.requester.surfaceLabel, itemLabel: itemLabel, ttl: ttl) { payload in
+                    try store.approve(stored, lifetime: lifetime, sessionLabel: prompt.requester.surfaceLabel,
+                                      grantedTo: grantedTo, itemLabel: itemLabel) { payload in
                         guard let signer else { throw NoApprovalKey() }
                         return try signer.sign(payload, context: context)
                     }
                 case .device(let proof, let grant?):
-                    try store.approve(k, sessionLabel: prompt.requester.surfaceLabel, itemLabel: itemLabel,
+                    try store.approve(stored, sessionLabel: prompt.requester.surfaceLabel, grantedTo: grantedTo, itemLabel: itemLabel,
                                       approvedAt: grant.approvedAt, expiresAt: grant.expiresAt, proof: proof)
                 case .device(_, nil):
                     log.write("approved once, not remembered: the phone's reply carried no grant")
@@ -448,7 +495,7 @@ final class Daemon {
 
     private static func describe(_ key: DialogKey) -> String {
         switch key {
-        case .agent(let k): return "\(k.agent.rawValue):\(k.sessionId)"
+        case .agent(let k): return k.audience.logName
         case .terminal(let k): return "terminal:\(k.sid)"
         }
     }

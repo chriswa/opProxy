@@ -12,7 +12,7 @@ if (arguments[0] as NSString).lastPathComponent == "op" {
 }
 
 let usage = """
-    opProxy — approves agent 1Password CLI requests once per session and command.
+    opProxy — puts an approval dialog in front of agent 1Password CLI reads.
 
     Installed as `op` (a symlink to this binary), it proxies read-only commands from
     Claude Code, Codex and Cursor sessions through a daemon; everything else execs the
@@ -119,7 +119,11 @@ case "list":
     f.dateFormat = "MMM d HH:mm"
     for a in approvals {
         let label = a.sessionLabel.map { " “\($0)”" } ?? ""
-        print("\(a.key.agent.displayName) \(a.key.sessionId)\(label)")
+        switch a.key.audience {
+        case .session(let agent, let id): print("\(agent.displayName) \(id)\(label)")
+        case .process(let agent, let instance): print("\(agent.displayName) process \(instance)\(label)")
+        case .allAgents: print("All agents")
+        }
         let env = a.key.env.map { "\($0.key)=\($0.value) " }.sorted().joined()
         print("    \(env)op \(a.key.argv.joined(separator: " "))")
         print("    approved \(f.string(from: a.approvedAt)), expires \(f.string(from: a.expiresAt))")
@@ -130,7 +134,7 @@ case "revoke":
     let signer = makeApprovalSigner(paths: paths)
     let store = makeApprovalStore(paths: paths, signer: signer, devices: makePairedDeviceStore(paths: paths, signer: signer))
     do {
-        let n = try store.revoke { target == "--all" || $0.key.sessionId == target }
+        let n = try store.revoke { target == "--all" || $0.key.audience.sessionId == target }
         print("Revoked \(n) approval\(n == 1 ? "" : "s").")
     } catch { fail("could not update \(paths.approvals.path): \(error)") }
 
