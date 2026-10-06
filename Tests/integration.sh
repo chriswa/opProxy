@@ -421,5 +421,28 @@ check "disabled: straight to the real op" not_daemon "$(agent "$OP" read op://a/
 "$BIN" enable >/dev/null
 check "enabled again: proxied" via_daemon "$(agent "$OP" read op://a/b/c)"
 
+# --- Spaceterm: looked up by stable node ID; the agent's name is shown but never stored
+mkdir -p "$WORK/st"
+python3 - "$WORK/st/scripts.sock" <<'PY' & SPACETERM_PID=$!
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen()
+while True:
+    c, _ = s.accept()
+    req = json.loads(c.makefile().readline())
+    reply = {"type": "script-get-node-result", "seq": req["seq"]}
+    if req["nodeId"] == "node-1":
+        reply |= {"node": {"name": "fix flaky tests"}, "agentName": "Kevin"}
+    else:
+        reply["error"] = "unknown-node"
+    c.sendall((json.dumps(reply) + "\n").encode()); c.close()
+PY
+for _ in $(seq 50); do [ -S "$WORK/st/scripts.sock" ] && break; sleep 0.1; done
+SPACETERM_HOME="$WORK/st" start_daemon approved
+SPACETERM_NODE_ID=node-1 SPACETERM_SURFACE_ID=pty-2 SID=sess-N agent "$OP" read op://n/a/me >/dev/null
+check "spaceterm: dialog shows the agent's name" grep -q '"label":"fix flaky tests".*"requester":"Kevin (Claude Code)"' "$LOG"
+check "spaceterm: approval stores the title" grep -q '"sessionLabel" : "fix flaky tests"' "$OPPROXY_HOME/approvals.json"
+check "spaceterm: approval never stores the name" not_in Kevin "$OPPROXY_HOME/approvals.json"
+kill "$SPACETERM_PID" 2>/dev/null
+
 echo; echo "$PASS passed, $FAIL failed"
 [ $FAIL = 0 ]

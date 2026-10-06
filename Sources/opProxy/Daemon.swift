@@ -127,33 +127,38 @@ enum Requester {
     case agent(AgentRequester)
     case terminal(TerminalRequester)
 
+    /// "Kevin (Claude Code)" when Spaceterm has named the agent, else "Claude Code".
     var name: String {
+        let kind: String
         switch self {
-        case .agent(let a): return a.session.agent.displayName
-        case .terminal(let t): return t.info.app == "unknown process" ? "A process" : t.info.app
+        case .agent(let a): kind = a.session.agent.displayName
+        case .terminal(let t): kind = t.info.app == "unknown process" ? "A process" : t.info.app
+        }
+        return surface?.agentName.map { "\($0) (\(kind))" } ?? kind
+    }
+
+    /// The Spaceterm surface the caller is in, if any.
+    var surface: SpacetermSurface? {
+        switch self {
+        case .agent(let a): return a.surface
+        case .terminal(let t): return t.surface
         }
     }
 
-    /// Spaceterm surface title and link, when the caller is in one.
-    var surfaceLabel: String? {
-        switch self {
-        case .agent(let a): return a.sessionLabel
-        case .terminal(let t): return t.surfaceLabel
-        }
-    }
+    /// The surface's title: the only part of the surface an approval stores.
+    var surfaceTitle: String? { surface?.title }
 
     var spacetermURL: URL? {
-        switch self {
-        case .agent(let a): return a.session.spacetermURL
-        case .terminal(let t): return t.surfaceId.flatMap { URL(string: "spaceterm-surface://\($0)") }
-        }
+        if let surface { return SpacetermSurface.link(surface.nodeId) }
+        if case .agent(let a) = self { return SpacetermSurface.link(a.session.sessionId) }
+        return nil
     }
 }
 
 struct AgentRequester {
     /// As the caller claims it; only the agent process behind it is verified.
     let session: AgentSession
-    let sessionLabel: String?
+    let surface: SpacetermSurface?
     let caller: CallerContext
     let lastMessage: String?
     let agentPid: pid_t
@@ -161,8 +166,7 @@ struct AgentRequester {
 
 struct TerminalRequester {
     let info: TerminalInfo
-    let surfaceId: String?
-    let surfaceLabel: String?
+    let surface: SpacetermSurface?
 }
 
 /// Everything the approval dialog shows.
@@ -180,7 +184,7 @@ struct ApprovalPrompt {
     /// Completes the system's "opProxy is trying to …" sentence; capitalized, it's also the
     /// line a phone shows beside its slide control.
     var touchIDReason: String {
-        let who = requester.surfaceLabel.map { "\(requester.name) “\($0)”" } ?? requester.name
+        let who = requester.surfaceTitle.map { "\(requester.name) in “\($0)”" } ?? requester.name
         return "let \(who) \(description.summary)"
     }
 }
@@ -379,7 +383,7 @@ final class Daemon {
         let tag: String
         if let identity = SessionIdentity.verify(peer: peer) {
             let claimed = request.session.flatMap { $0.agent == identity.agent ? $0 : nil }
-            let session = claimed ?? AgentSession(agent: identity.agent, sessionId: "unknown", surfaceId: request.surfaceId)
+            let session = claimed ?? AgentSession(agent: identity.agent, sessionId: "unknown")
             tag = "\(session.agent.rawValue):\(session.sessionId.prefix(8)) \(command)"
             // An agent that names no session gets its process as the audience, so nameless
             // agents never share approvals with each other.
@@ -446,13 +450,13 @@ final class Daemon {
                 switch authority {
                 case .touchID(let context):
                     if let context { signingContext = context }
-                    try store.approve(stored, lifetime: lifetime, sessionLabel: prompt.requester.surfaceLabel,
+                    try store.approve(stored, lifetime: lifetime, sessionLabel: prompt.requester.surfaceTitle,
                                       grantedTo: grantedTo, itemLabel: itemLabel) { payload in
                         guard let signer else { throw NoApprovalKey() }
                         return try signer.sign(payload, context: context)
                     }
                 case .device(let proof, let grant?):
-                    try store.approve(stored, sessionLabel: prompt.requester.surfaceLabel, grantedTo: grantedTo, itemLabel: itemLabel,
+                    try store.approve(stored, sessionLabel: prompt.requester.surfaceTitle, grantedTo: grantedTo, itemLabel: itemLabel,
                                       approvedAt: grant.approvedAt, expiresAt: grant.expiresAt, proof: proof)
                 case .device(_, nil):
                     log.write("approved once, not remembered: the phone's reply carried no grant")
@@ -540,7 +544,7 @@ final class Daemon {
                              identity: SessionIdentity) -> ApprovalPrompt {
         let command = OpCommand(argv: request.argv)
         let caller = CallerContext.from(chain: ProcessTree.ancestry(of: peer), agentPid: identity.agentPid)
-        let requester = AgentRequester(session: session, sessionLabel: spacetermLabel(session.surfaceId ?? request.surfaceId),
+        let requester = AgentRequester(session: session, surface: spacetermSurface(request),
                                        caller: caller, lastMessage: SessionInfo.lastAgentMessage(session),
                                        agentPid: identity.agentPid)
         let names = resolveNames(command, env: request.env, mayPrompt: true)
@@ -551,14 +555,14 @@ final class Daemon {
     private func terminalPrompt(_ request: ProxyRequest, key: DialogKey, peer: pid_t, sid: pid_t) -> ApprovalPrompt {
         let command = OpCommand(argv: request.argv)
         let info = TerminalInfo.from(chain: ProcessTree.ancestry(of: peer), sid: sid)
-        let requester = TerminalRequester(info: info, surfaceId: request.surfaceId, surfaceLabel: spacetermLabel(request.surfaceId))
+        let requester = TerminalRequester(info: info, surface: spacetermSurface(request))
         let names = resolveNames(command, env: request.env, mayPrompt: true)
         return ApprovalPrompt(key: key, request: request, requester: .terminal(requester), description: command.description,
                               resolvedItem: names?.item, resolvedVault: names?.vault, peerPid: peer)
     }
 
-    private func spacetermLabel(_ surfaceId: String?) -> String? {
-        surfaceId.flatMap { SessionInfo.spacetermLabel(surfaceId: $0, environment: ProcessInfo.processInfo.environment) }
+    private func spacetermSurface(_ request: ProxyRequest) -> SpacetermSurface? {
+        request.spacetermNodeId.map { SpacetermSurface.lookup(nodeId: $0, environment: ProcessInfo.processInfo.environment) }
     }
 
     struct ResolvedNames {

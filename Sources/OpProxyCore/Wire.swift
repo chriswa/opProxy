@@ -5,17 +5,17 @@ public struct ProxyRequest: Codable {
     /// The agent session the caller's environment claims, if any. The daemon decides from
     /// the process tree whether an agent is really behind the call.
     public let session: AgentSession?
-    /// `SPACETERM_SURFACE_ID`, for the dialog's title and link. Display only.
-    public let surfaceId: String?
+    /// `SpacetermSurface.nodeId(environment:)`, for the dialog's title and link. Display only.
+    public let spacetermNodeId: String?
     /// The caller's exact argv (after `op`); this is what an approval covers. The daemon
     /// derives routing from it itself and never trusts the client's view of it.
     public let argv: [String]
     public let env: [String: String]
     public let cwd: String
 
-    public init(session: AgentSession?, surfaceId: String?, argv: [String], env: [String: String], cwd: String) {
+    public init(session: AgentSession?, spacetermNodeId: String?, argv: [String], env: [String: String], cwd: String) {
         self.session = session
-        self.surfaceId = surfaceId
+        self.spacetermNodeId = spacetermNodeId
         self.argv = argv
         self.env = env
         self.cwd = cwd

@@ -111,7 +111,7 @@ final class OpCommandTests: XCTestCase {
 final class AgentSessionTests: XCTestCase {
     func testDetectsEachAgent() {
         XCTAssertEqual(AgentSession.detect(environment: ["CLAUDE_CODE_SESSION_ID": "c1", "SPACETERM_SURFACE_ID": "s1"]),
-                       AgentSession(agent: .claude, sessionId: "c1", surfaceId: "s1"))
+                       AgentSession(agent: .claude, sessionId: "c1"))
         XCTAssertEqual(AgentSession.detect(environment: ["CODEX_THREAD_ID": "x1"])?.agent, .codex)
         XCTAssertEqual(AgentSession.detect(environment: ["CURSOR_CONVERSATION_ID": "u1", "CURSOR_AGENT": "1"])?.agent, .cursor)
         XCTAssertNil(AgentSession.detect(environment: ["CLAUDE_CODE_SESSION_ID": ""]))
@@ -140,11 +140,18 @@ final class AgentSessionTests: XCTestCase {
         XCTAssertEqual(AgentSession.detect(environment: cursorEnv, ancestry: { cursorChain })?.sessionId, "cursor-inner")
     }
 
-    func testSpacetermURLPrefersSurface() {
-        XCTAssertEqual(AgentSession(agent: .claude, sessionId: "c1", surfaceId: "s1").spacetermURL?.absoluteString,
-                       "spaceterm-surface://s1")
-        XCTAssertEqual(AgentSession(agent: .codex, sessionId: "x1", surfaceId: nil).spacetermURL?.absoluteString,
-                       "spaceterm-surface://x1")
+    func testSpacetermNodeIdSurvivesRestarts() {
+        XCTAssertEqual(SpacetermSurface.nodeId(environment: ["SPACETERM_SURFACE_ID": "pty-2", "SPACETERM_NODE_ID": "n1"]), "n1")
+        XCTAssertEqual(SpacetermSurface.nodeId(environment: ["SPACETERM_SURFACE_ID": "s1", "SPACETERM_NODE_ID": ""]), "s1")
+        XCTAssertNil(SpacetermSurface.nodeId(environment: [:]))
+    }
+
+    func testSpacetermSurfaceReply() {
+        let named = SpacetermSurface.from(reply: ["type": "script-get-node-result", "agentName": " Kevin ",
+                                                  "node": ["name": "", "shellTitleHistory": ["fix flaky tests", "zsh"]]],
+                                          nodeId: "n1")
+        XCTAssertEqual(named, SpacetermSurface(nodeId: "n1", title: "fix flaky tests", agentName: "Kevin"))
+        XCTAssertEqual(SpacetermSurface.from(reply: ["error": "unknown-node"], nodeId: "n1"), SpacetermSurface(nodeId: "n1"))
     }
 
     func testEnvironmentForwarding() {

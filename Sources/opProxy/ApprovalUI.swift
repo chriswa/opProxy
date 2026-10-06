@@ -338,9 +338,9 @@ final class ApprovalView: NSView {
         let whereText: String
         switch prompt.requester {
         case .agent(let a):
-            whereText = a.sessionLabel.map { "in “\($0)”" } ?? "in an untitled session"
+            whereText = a.surface?.title.map { "in “\($0)”" } ?? "in an untitled session"
         case .terminal(let t):
-            whereText = (["in a terminal tab"] + [t.info.tty, t.surfaceLabel.map { "“\($0)”" }].compactMap { $0 })
+            whereText = (["in a terminal tab"] + [t.info.tty, t.surface?.title.map { "“\($0)”" }].compactMap { $0 })
                 .joined(separator: " · ")
         }
         let session = NSTextField(labelWithString: whereText)
@@ -773,7 +773,7 @@ final class ScriptedApprover: LocalApprover {
             "resolvedVault": prompt.resolvedVault ?? NSNull(),
             "details": prompt.description.details.map { "\($0.label)=\($0.value)" },
             "requester": prompt.requester.name,
-            "label": prompt.requester.surfaceLabel ?? NSNull(),
+            "label": prompt.requester.surfaceTitle ?? NSNull(),
         ]
         var fields = shown
         switch prompt.requester {

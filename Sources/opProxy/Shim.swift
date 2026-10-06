@@ -17,10 +17,9 @@ enum Shim {
         else { passthrough(paths.realOp, args) }
         let plan = OpCommand(argv: args).routing
 
-        let surface = [env["SPACETERM_SURFACE_ID"], env["SPACETERM_NODE_ID"]].compactMap { $0 }.first { !$0.isEmpty }
         let request = ProxyRequest(
             session: AgentSession.detect(environment: env, ancestry: { ProcessTree.ancestry(of: getpid()) }),
-            surfaceId: surface, argv: args, env: ProxyRequest.forwardedEnvironment(env),
+            spacetermNodeId: SpacetermSurface.nodeId(environment: env), argv: args, env: ProxyRequest.forwardedEnvironment(env),
             cwd: FileManager.default.currentDirectoryPath)
 
         guard let body = try? JSONEncoder().encode(DaemonMessage.proxy(request)),

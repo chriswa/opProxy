@@ -39,12 +39,10 @@ public enum AgentKind: String, Codable, CaseIterable {
 public struct AgentSession: Codable, Equatable {
     public let agent: AgentKind
     public let sessionId: String
-    public let surfaceId: String?
 
-    public init(agent: AgentKind, sessionId: String, surfaceId: String?) {
+    public init(agent: AgentKind, sessionId: String) {
         self.agent = agent
         self.sessionId = sessionId
-        self.surfaceId = surfaceId
     }
 
     /// Agents inherit each other's environment when nested (Codex launched from Claude sees
@@ -52,7 +50,6 @@ public struct AgentSession: Codable, Equatable {
     /// `ancestry` decides.
     public static func detect(environment env: [String: String],
                               ancestry: () -> [ProcessEntry] = { [] }) -> AgentSession? {
-        let surfaceId = nonEmpty(env["SPACETERM_SURFACE_ID"]) ?? nonEmpty(env["SPACETERM_NODE_ID"])
         var candidates: [AgentKind: String] = [:]
         for agent in AgentKind.allCases {
             if let id = agent.sessionIdVariables.lazy.compactMap({ nonEmpty(env[$0]) }).first {
@@ -68,12 +65,7 @@ public struct AgentSession: Codable, Equatable {
             chosen = candidates.keys.first
         }
         guard let chosen, let id = candidates[chosen] else { return nil }
-        return AgentSession(agent: chosen, sessionId: id, surfaceId: surfaceId)
-    }
-
-    /// Spaceterm resolves either a surface ID or an agent session ID; the surface ID is exact.
-    public var spacetermURL: URL? {
-        URL(string: "spaceterm-surface://\(surfaceId ?? sessionId)")
+        return AgentSession(agent: chosen, sessionId: id)
     }
 }
 

@@ -44,6 +44,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 
 - **Always on top, one at a time.** The dialog takes focus when it appears. Any other requests wait in a queue, with a count shown; identical requests share one dialog.
 - **The item is the headline.** Opaque item and vault IDs are resolved to their names through the real `op`, ahead of the dialog.
+- **Who is asking, by name.** For a request from a Spaceterm surface, the dialog names the agent the way Spaceterm does, as in "Kevin (Claude Code) … in “fix flaky tests”". Spaceterm reuses names once a surface is archived, so the name appears only in live prompts (the dialog, the phone and the Touch ID reason) and is never saved with an approval; stored approvals keep only the surface's title.
 - **Context comes next:** the details, the exact `op` command, the agent's full shell command (recovered from the process tree), its most recent transcript message, then PIDs and the working directory.
 - **Only Touch ID approves.** The dialog embeds Apple's inline Touch ID glyph (`LAAuthenticationView`), so there's no separate system sheet.
 - **Deny, or wait for the countdown.** The Deny button shows the countdown; after 110 seconds the request is denied.

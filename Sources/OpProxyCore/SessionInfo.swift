@@ -1,25 +1,56 @@
 import Foundation
 
-/// Best-effort context about the requesting session: its Spaceterm title and the agent's
-/// most recent message. Every lookup is optional and quietly returns nil on failure.
-public enum SessionInfo {
-    // MARK: Spaceterm
-
+/// The Spaceterm surface a request came from. Display only: the node ID is whatever the
+/// caller's environment says, and anything running as the user can answer on Spaceterm's socket.
+public struct SpacetermSurface: Equatable {
+    /// Spaceterm's stable node ID. `SPACETERM_SURFACE_ID` is a pty session ID that stops
+    /// matching the node once its terminal restarts, so it is only a fallback.
+    public let nodeId: String
     /// The surface's user-set name, else its newest shell title.
-    public static func spacetermLabel(surfaceId: String, environment env: [String: String],
-                                      timeout: TimeInterval = 1) -> String? {
-        let dir = nonEmpty(env["SPACETERM_HOME"])
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".spaceterm").path
-        let request = ["type": "script-get-node", "seq": 1, "nodeId": surfaceId] as [String: Any]
-        guard let body = try? JSONSerialization.data(withJSONObject: request),
-              let reply = UnixSocket.requestLine(path: dir + "/scripts.sock", line: body, timeout: timeout,
-                                                 until: { $0["type"] as? String == "script-get-node-result" }),
-              let node = reply["node"] as? [String: Any]
-        else { return nil }
-        if let name = node["name"] as? String, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
-        return (node["shellTitleHistory"] as? [String])?.first?.trimmingCharacters(in: .whitespaces)
+    public let title: String?
+    /// The name Spaceterm gave the agent ("Kevin"). Spaceterm frees a name when its surface is
+    /// archived and may give it to another agent, so it is shown live and never stored.
+    public let agentName: String?
+
+    public init(nodeId: String, title: String? = nil, agentName: String? = nil) {
+        self.nodeId = nodeId
+        self.title = title
+        self.agentName = agentName
     }
 
+    public static func nodeId(environment env: [String: String]) -> String? {
+        nonEmpty(env["SPACETERM_NODE_ID"]) ?? nonEmpty(env["SPACETERM_SURFACE_ID"])
+    }
+
+    /// Spaceterm opens a node ID or an agent session ID.
+    public static func link(_ id: String) -> URL? {
+        URL(string: "spaceterm-surface://\(id)")
+    }
+
+    /// The surface as Spaceterm describes it; just the ID when Spaceterm doesn't answer.
+    public static func lookup(nodeId: String, environment env: [String: String], timeout: TimeInterval = 1) -> SpacetermSurface {
+        let dir = nonEmpty(env["SPACETERM_HOME"])
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".spaceterm").path
+        let request = ["type": "script-get-node", "seq": 1, "nodeId": nodeId] as [String: Any]
+        guard let body = try? JSONSerialization.data(withJSONObject: request),
+              let reply = UnixSocket.requestLine(path: dir + "/scripts.sock", line: body, timeout: timeout,
+                                                 until: { $0["type"] as? String == "script-get-node-result" })
+        else { return SpacetermSurface(nodeId: nodeId) }
+        return from(reply: reply, nodeId: nodeId)
+    }
+
+    static func from(reply: [String: Any], nodeId: String) -> SpacetermSurface {
+        func trimmed(_ s: Any?) -> String? {
+            nonEmpty((s as? String)?.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let node = reply["node"] as? [String: Any]
+        let title = trimmed(node?["name"]) ?? trimmed((node?["shellTitleHistory"] as? [Any])?.first)
+        return SpacetermSurface(nodeId: nodeId, title: title, agentName: trimmed(reply["agentName"]))
+    }
+}
+
+/// Best-effort context about the requesting session. Every lookup quietly returns nil on failure.
+public enum SessionInfo {
     // MARK: Transcripts
 
     /// The agent's latest assistant text. Agents write a tool call to the transcript only after
