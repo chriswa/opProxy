@@ -1,6 +1,6 @@
 # opProxy
 
-A drop-in `op` that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. You approve each secret once, with Touch ID, in a dialog that shows the item, who is asking and why. Repeats then run silently for as long as you chose.
+A drop-in `op` that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. You approve each secret once, with Touch ID, in a dialog that shows the item, who is asking and why, or from a paired iPhone running Spaceterm. Repeats then run silently for as long as you chose.
 
 ## How it works
 
@@ -48,6 +48,16 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 - **Guarded input.** The keyboard does nothing except ⌘C, and clicks are ignored for 500ms after the dialog appears.
 - **Agents that stop waiting.** If an agent gives up before you answer, the dialog says so. Approving still lets the agent's retry go through silently.
 
+### Approving from your phone
+
+Every request that would show the dialog is also published on a feed socket, `~/.opProxy/approval-feed.sock`, which Spaceterm relays to its iPhone app. The protocol is `~/spaceterm/APPROVAL_FEED.md`.
+
+- **Same options as the desktop.** The phone shows what the dialog shows (the item, the request, the `op` command, the agent's shell command and last message, PIDs and directory) and offers the same choices: **Once · 1 Hour · 7 Days · 3 Months · Forever** for agents, **Once · This Tab** for terminals.
+- **The first answer wins.** The dialog and the phone ask at the same time. Answer on either and the other one goes away; a late answer from the other side is refused. A request leaves the phone when it's answered anywhere or times out, and its countdown on the phone starts when its dialog appears on the Mac.
+- **Phone approvals work like Touch ID ones.** A lasting agent approval from the phone is stored and lasts just as long. It can't be signed by the Mac's Secure Enclave key without your Touch ID, so it's stored with the phone's own signed reply instead. That reply commits to the exact entry (session, agent process, command, approval time and expiry), so it can't be edited, moved to another request or extended.
+- **Pairing.** The phone asks to pair over the feed. The Mac shows the phone's name and key fingerprint; check the phone shows the same fingerprint, click **Pair…**, then touch Touch ID. The paired key is signed with the approval key, so nothing can pair a phone without your Touch ID.
+- **Unpairing.** `opProxy devices` lists paired phones with their fingerprints, and `opProxy unpair <key-id> | --all` (or the menu's **Paired Phones**) removes one. Unpairing a phone also ends every lasting approval made on it.
+
 ### Menu bar
 
 - **Status icon.** A key with the time left on the 1Password authorization, rounded to the nearest unit ("12h", "32m"). When it's unauthorized or past the 12 hours, it becomes a red snapped key.
@@ -59,6 +69,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
   - **Revoke Everything for This Session**
 
   Changing the duration re-signs the approval. It reuses your most recent approval's Touch ID, so it only asks again after a daemon restart. **Revoke All** sits at the bottom of the list.
+- **Paired Phones.** Each paired phone with its fingerprint; choosing one unpairs it.
 - **Installed.** Turns proxying off and on everywhere. When it's off, `op` goes straight to 1Password.
 - **Open at Login**, **Restart opProxy**, **Quit opProxy.** The LaunchAgent relaunches the daemon only after a crash, so Quit stays quit until you log in again or open `bin/opProxy.app`.
 
@@ -83,6 +94,7 @@ Every daemon start brings a macOS "access data from other apps" dialog: `op` rea
 opProxy status | refresh
 opProxy list | revoke --all | revoke <session-id>
 opProxy disable | enable
+opProxy devices | unpair <key-id> | unpair --all
 ```
 
 The log is `~/.opProxy/daemon.log`. It records proxied command lines only; passthrough commands, which can carry secrets as arguments, are never logged.
@@ -97,6 +109,7 @@ opProxy runs as your own user, with no root component. Every measure below assum
   - Setting `CLAUDE_CODE_SESSION_ID`, or `exec env …` in a tool call, can't reach another process's approvals.
   - A process renamed to `claude` isn't treated as an agent.
   - An agent that strips its session variables is still treated as an agent, not a terminal.
+- **Phone replies are signed by the phone.** Anything running as you can connect to the feed socket and to Spaceterm's, so the feed acts only on replies signed by a paired phone's key, for a request it has pending and a document it actually sent. Phone approvals stored for later carry that signed reply, which commits to the exact entry, and stop verifying once the phone is unpaired.
 - **Approvals can't be forged.** Each agent approval, including its expiry, is signed by a Secure Enclave P-256 key that requires user presence for every signature. The private key can't leave this Mac's Secure Enclave. The daemon verifies entries against a public key compiled into the binary, so editing, replaying or adding entries in `approvals.json` does nothing, and swapping the key blob only breaks approvals.
 - **Only 1Password's `op` runs in the session.** Before each run, the daemon checks the `op` file's code signature against 1Password's team (2BUA8C4S2C). It then starts `op` suspended and resumes it only if the kernel's code hash for the loaded code matches the file it verified. Swapping `op` on disk, even mid-launch, gets the process killed before it executes.
 - **Only this build can hold the session.** A new session holder must have the same kernel-reported code hash as the running daemon, so a binary swapped into the bundle can't receive the next refresh's authorization.
@@ -112,6 +125,11 @@ opProxy runs as your own user, with no root component. Every measure below assum
 - **Reuse within an approved agent session.** A prompt-injected agent can re-run any command you already approved in that session, for the duration you chose. That's limited to those exact commands.
 - **Metadata is free.** Item titles, vaults, URLs and usernames come back from listings without any dialog.
 - **Duration changes from the menu.** Anything with Accessibility permission could click the menu to extend an existing approval, since those changes reuse your last Touch ID. It can't create new approvals.
+
+**Can yield secrets from your phone, without Touch ID:**
+- **Phone approvals need no biometric.** The Spaceterm app signs a reply with its Secure Enclave key once you drag the slide control in its native panel all the way across. Neither Face ID nor Touch ID is involved.
+- **Only the native panel is trustworthy.** The rest of the request on the phone (item, command, agent context) is drawn by Spaceterm's web page, which agents can modify. A modified page can show you a harmless-looking request while the native panel's one-line confirmation ("Let Claude Code … read …") and the option you chose describe what you're really approving. Read that line.
+- **A lost or stolen unlocked phone.** Anyone holding it unlocked, with the app open, can approve requests that are pending. Unpair it (`opProxy unpair`), which also ends the lasting approvals made on it.
 
 **Need your Touch ID, but could trick you into giving it:**
 - **A replaced opProxy.** An agent can replace `bin/opProxy.app` or the LaunchAgent plist and restart the daemon, or edit this source and wait for your next `./install.sh`. The fake daemon then needs 1Password's prompt to be authorized, and you approve those prompts routinely. An unexpected 1Password prompt, outside startup or the 12-hour cadence, is the warning sign. A root-owned install (binary, plist and a verified copy of `op` in locations only root can write) would close this, but needs sudo.
@@ -136,7 +154,7 @@ A future 1Password option that trusts a specific signed app, or allows longer au
 `Sources/opProxy/ApprovalKeyPin.swift` is per-Mac and untracked, and `./install.sh` creates it. Run that once on a fresh checkout before building.
 
 ```
-swift test                             # parsing, signed approvals, identity, durations, terminal approvals
-swift build && Tests/integration.sh    # shim, daemon and holder against a stub op and a fake agent
+swift test                             # parsing, signed approvals, phone proofs and pairing, identity, durations, terminal approvals
+swift build && Tests/integration.sh    # shim, daemon, holder and approval feed against a stub op, a fake agent and a fake phone
 swift build && .build/debug/opProxy render-dialog <dir> --on-screen   # dialog and backdrop screenshots
 ```

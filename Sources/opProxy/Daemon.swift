@@ -13,9 +13,61 @@ enum ApprovalScope: Equatable {
     case tab
 }
 
+/// One choice of how long an approval lasts. The dialog and the approval feed both offer
+/// exactly these; `id` is what a phone's statement picks.
+struct ApprovalOption {
+    let id: String
+    let label: String
+    let scope: ApprovalScope
+    /// Explains the choice; the dialog prefixes "Touch ID".
+    let hint: String
+}
+
+enum ApprovalOptions {
+    static let forever = "forever"
+
+    static func `for`(_ requester: Requester) -> (options: [ApprovalOption], defaultIndex: Int) {
+        let once = ApprovalOption(id: "once", label: "Once", scope: .once, hint: "Runs this one request and remembers nothing.")
+        switch requester {
+        case .agent:
+            return ([
+                once,
+                ApprovalOption(id: "1h", label: "1 Hour", scope: .lasting(3600),
+                               hint: "Approves this exact command in this agent session for 1 hour."),
+                ApprovalOption(id: "7d", label: "7 Days", scope: .lasting(ApprovalStore.defaultTTL),
+                               hint: "Approves this exact command in this agent session for 7 days."),
+                ApprovalOption(id: "3mo", label: "3 Months", scope: .lasting(90 * 24 * 3600.0),
+                               hint: "Approves this exact command in this agent session for 3 months."),
+                ApprovalOption(id: forever, label: "Forever", scope: .lasting(ApprovalStore.forever.timeIntervalSinceNow),
+                               hint: "Approves this exact command for as long as this agent session runs."),
+            ], 2)
+        case .terminal:
+            return ([
+                once,
+                ApprovalOption(id: "tab", label: "This Tab", scope: .tab,
+                               hint: "Approves reads from this terminal tab until it's unused for 10 minutes (12 hours at most)."),
+            ], 1)
+        }
+    }
+
+    /// The expiry `option` grants for an approval made at `approvedAt`; nil if it stores nothing.
+    static func expiry(of option: ApprovalOption, from approvedAt: Date) -> Date? {
+        guard case .lasting(let ttl) = option.scope else { return nil }
+        return option.id == forever ? ApprovalStore.forever : approvedAt.addingTimeInterval(ttl)
+    }
+}
+
+/// Who approved, and what that lets the daemon store.
+enum Authority {
+    /// The dialog's Touch ID-evaluated context, which authorizes signing the approval.
+    case touchID(LAContext?)
+    /// A paired phone. A lasting approval is stored with the phone's proof and exactly the
+    /// times its challenge committed to; `grant` is nil for options that store nothing.
+    case device(DeviceProof, grant: (approvedAt: Date, expiresAt: Date)?)
+}
+
 enum Decision {
-    /// Carries the Touch ID-evaluated context that authorizes signing the approval.
-    case approved(LAContext?, ApprovalScope)
+    case approved(Authority, ApprovalScope)
     case denied, timedOut
 
     var label: String {
@@ -28,9 +80,9 @@ enum Decision {
 
     init?(scripted: String) {
         switch scripted {
-        case "approved": self = .approved(nil, .lasting(ApprovalStore.defaultTTL))
-        case "approved-once": self = .approved(nil, .once)
-        case "approved-hour": self = .approved(nil, .lasting(3600))
+        case "approved": self = .approved(.touchID(nil), .lasting(ApprovalStore.defaultTTL))
+        case "approved-once": self = .approved(.touchID(nil), .once)
+        case "approved-hour": self = .approved(.touchID(nil), .lasting(3600))
         case "denied": self = .denied
         case "timedOut": self = .timedOut
         default: return nil
@@ -98,6 +150,13 @@ struct ApprovalPrompt {
     let resolvedVault: String?
     /// The process that asked (usually the shim).
     let peerPid: pid_t
+
+    /// Completes the system's "opProxy is trying to …" sentence; capitalized, it's also the
+    /// line a phone shows beside its slide control.
+    var touchIDReason: String {
+        let who = requester.surfaceLabel.map { "\(requester.name) “\($0)”" } ?? requester.name
+        return "let \(who) \(description.summary)"
+    }
 }
 
 protocol Approver: AnyObject {
@@ -116,6 +175,7 @@ final class Daemon {
     let approver: Approver
     let log: Log
     private let store: ApprovalStore
+    let devices: PairedDeviceStore
     private let terminals: TerminalApprovals
     private let stateQueue = DispatchQueue(label: "opProxy.state")
     private var pending: [DialogKey: [(Decision) -> Void]] = [:]
@@ -127,13 +187,14 @@ final class Daemon {
     /// it lets the menu re-sign an approval's expiry without another touch.
     private var signingContext: LAContext?
 
-    init(paths: Paths, approver: Approver, log: Log, auth: AuthTracker) {
+    init(paths: Paths, approver: Approver, log: Log, auth: AuthTracker, signer: ApprovalSigner?, devices: PairedDeviceStore) {
         self.paths = paths
         self.approver = approver
         self.log = log
         self.auth = auth
-        signer = makeApprovalSigner(paths: paths)
-        store = makeApprovalStore(paths: paths, signer: signer)
+        self.signer = signer
+        self.devices = devices
+        store = makeApprovalStore(paths: paths, signer: signer, devices: devices)
         terminals = TerminalApprovals(idle: Double(TestKnobs.value("OPPROXY_TERMINAL_IDLE") ?? "") ?? TerminalApprovals.defaultIdle)
     }
 
@@ -325,7 +386,7 @@ final class Daemon {
     /// Agent approvals are signed and persisted; terminal ones live in memory. "Only this
     /// once" records nothing: the waiting request just runs.
     private func record(_ decision: Decision, for prompt: ApprovalPrompt) {
-        guard case .approved(let context, let scope) = decision else { return }
+        guard case .approved(let authority, let scope) = decision else { return }
         switch (prompt.key, scope) {
         case (_, .once):
             break
@@ -334,12 +395,20 @@ final class Daemon {
                 terminals.approve(k, label: t.info.app + (t.info.tty.map { " · \($0)" } ?? ""))
             }
         case (.agent(let k), .lasting(let ttl)):
-            if let context { signingContext = context }
+            let itemLabel = prompt.resolvedItem ?? prompt.description.subject
             do {
-                try store.approve(k, sessionLabel: prompt.requester.surfaceLabel,
-                                  itemLabel: prompt.resolvedItem ?? prompt.description.subject, ttl: ttl) { payload in
-                    guard let signer else { throw NoApprovalKey() }
-                    return try signer.sign(payload, context: context)
+                switch authority {
+                case .touchID(let context):
+                    if let context { signingContext = context }
+                    try store.approve(k, sessionLabel: prompt.requester.surfaceLabel, itemLabel: itemLabel, ttl: ttl) { payload in
+                        guard let signer else { throw NoApprovalKey() }
+                        return try signer.sign(payload, context: context)
+                    }
+                case .device(let proof, let grant?):
+                    try store.approve(k, sessionLabel: prompt.requester.surfaceLabel, itemLabel: itemLabel,
+                                      approvedAt: grant.approvedAt, expiresAt: grant.expiresAt, proof: proof)
+                case .device(_, nil):
+                    log.write("approved once, not remembered: the phone's reply carried no grant")
                 }
             } catch {
                 log.write("approved once, not remembered: could not sign the approval: \(error)")
@@ -355,7 +424,7 @@ final class Daemon {
         var result = Decision.denied
         stateQueue.sync {
             // Approved while this request was gathering context.
-            if isApproved(key) { result = .approved(nil, .once); done.signal(); return }
+            if isApproved(key) { result = .approved(.touchID(nil), .once); done.signal(); return }
             let waiter: (Decision) -> Void = { result = $0; done.signal() }
             if pending[key] != nil {
                 pending[key]!.append(waiter)

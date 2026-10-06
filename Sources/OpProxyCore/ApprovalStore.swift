@@ -30,13 +30,29 @@ public struct Approval: Codable, Equatable {
     public let itemLabel: String?
     /// Signature over `signedPayload`, made with the Touch ID-gated approval key.
     public let signature: Data?
+    /// For approvals given on a paired phone, which can't use the Mac's approval key: the
+    /// phone's signed statement, whose challenge commits to `signedPayload`.
+    public let deviceProof: DeviceProof?
+
+    init(key: ApprovalKey, approvedAt: Date, expiresAt: Date, sessionLabel: String?, itemLabel: String?,
+         signature: Data?, deviceProof: DeviceProof? = nil) {
+        self.key = key
+        self.approvedAt = approvedAt
+        self.expiresAt = expiresAt
+        self.sessionLabel = sessionLabel
+        self.itemLabel = itemLabel
+        self.signature = signature
+        self.deviceProof = deviceProof
+    }
 
     /// Canonical bytes covering everything that grants access.
     public var signedPayload: Data {
         Self.payload(key: key, approvedAt: approvedAt, expiresAt: expiresAt)
     }
 
-    static func payload(key: ApprovalKey, approvedAt: Date, expiresAt: Date) -> Data {
+    /// `approvedAt` and `expiresAt` must be whole seconds, or the payload re-derived from the
+    /// ISO 8601 file won't match.
+    public static func payload(key: ApprovalKey, approvedAt: Date, expiresAt: Date) -> Data {
         struct Signed: Encodable {
             let version = 1
             let key: ApprovalKey
@@ -48,8 +64,9 @@ public struct Approval: Codable, Equatable {
 }
 
 /// Approvals persisted as JSON, each signed; entries whose signature doesn't verify (forged,
-/// edited, or replayed onto another session) are ignored. Not thread-safe: the daemon uses
-/// it from one queue.
+/// edited, or replayed onto another session) are ignored. An entry is signed either by the
+/// Mac's approval key or, when approved on a phone, carries that phone's proof instead.
+/// Not thread-safe: the daemon uses it from one queue.
 public final class ApprovalStore {
     public static let defaultTTL: TimeInterval = 7 * 24 * 60 * 60
 
@@ -57,21 +74,24 @@ public final class ApprovalStore {
     private let ttl: TimeInterval
     private let now: () -> Date
     private let verify: (_ payload: Data, _ signature: Data) -> Bool
+    private let verifyDevice: (Approval) -> Bool
     private var approvals: [Approval] = []
     private var loadedModification: Date?
 
     public init(url: URL, ttl: TimeInterval = ApprovalStore.defaultTTL, now: @escaping () -> Date = Date.init,
-                verify: @escaping (_ payload: Data, _ signature: Data) -> Bool) {
+                verify: @escaping (_ payload: Data, _ signature: Data) -> Bool,
+                verifyDevice: @escaping (Approval) -> Bool = { _ in false }) {
         self.url = url
         self.ttl = ttl
         self.now = now
         self.verify = verify
+        self.verifyDevice = verifyDevice
         reloadIfChanged()
     }
 
     private func isValid(_ a: Approval) -> Bool {
-        guard let signature = a.signature else { return false }
-        return verify(a.signedPayload, signature)
+        if let signature = a.signature, verify(a.signedPayload, signature) { return true }
+        return a.deviceProof != nil && verifyDevice(a)
     }
 
     /// Picks up `opProxy revoke` edits made by another process.
@@ -118,8 +138,20 @@ public final class ApprovalStore {
         try save()
     }
 
+    /// Records an approval given on a paired phone. Its times are the ones the phone's grant
+    /// committed to (see `DeviceProofCheck`), so they're taken as given rather than from now.
+    public func approve(_ key: ApprovalKey, sessionLabel: String?, itemLabel: String?, approvedAt: Date, expiresAt: Date,
+                        proof: DeviceProof) throws {
+        reloadIfChanged()
+        let t = now()
+        approvals.removeAll { $0.key == key || $0.expiresAt <= t }
+        approvals.append(Approval(key: key, approvedAt: approvedAt, expiresAt: expiresAt, sessionLabel: sessionLabel,
+                                  itemLabel: itemLabel, signature: nil, deviceProof: proof))
+        try save()
+    }
+
     /// Re-signs an existing approval with a new expiry, keeping when it was first approved and
-    /// its labels. Returns false if there is no such active approval.
+    /// its labels. The new signature is the Mac's, so a phone's proof is dropped. Returns false if there is no such active approval.
     @discardableResult
     public func changeExpiry(_ key: ApprovalKey, to expiresAt: Date, sign: (Data) throws -> Data) throws -> Bool {
         reloadIfChanged()
@@ -139,7 +171,7 @@ public final class ApprovalStore {
         guard let i = approvals.firstIndex(where: { $0.key == key }) else { return }
         let a = approvals[i]
         approvals[i] = Approval(key: a.key, approvedAt: a.approvedAt, expiresAt: a.expiresAt, sessionLabel: a.sessionLabel,
-                                itemLabel: label, signature: a.signature)
+                                itemLabel: label, signature: a.signature, deviceProof: a.deviceProof)
         try save()
     }
 

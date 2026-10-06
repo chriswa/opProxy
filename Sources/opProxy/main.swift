@@ -26,6 +26,8 @@ let usage = """
       opProxy status                 Daemon and 1Password authorization status
       opProxy refresh                Authorize a fresh 1Password session now (one prompt)
       opProxy disable | enable       Send every op call straight to 1Password, or back through opProxy
+      opProxy devices                Show phones paired to approve requests
+      opProxy unpair <key-id> | --all  Unpair a phone (by key ID or fingerprint prefix); ends its lasting approvals
 
     """
 
@@ -54,22 +56,29 @@ switch arguments.dropFirst().first {
 case "daemon":
     do { try paths.ensureStateDir() } catch { fail("could not create \(paths.stateDir.path): \(error)") }
     let log = Log(url: paths.log)
-    let approver: Approver
+    let local: LocalApprover
     if let scripted = TestKnobs.value("OPPROXY_TEST_APPROVER"), let decision = Decision(scripted: scripted) {
-        approver = ScriptedApprover(decision: decision, delay: Double(TestKnobs.value("OPPROXY_TEST_DELAY") ?? "") ?? 0, log: log)
+        local = ScriptedApprover(decision: decision, delay: Double(TestKnobs.value("OPPROXY_TEST_DELAY") ?? "") ?? 0, log: log)
     } else {
-        approver = DialogApprover()
+        local = DialogApprover()
     }
+    let signer = makeApprovalSigner(paths: paths)
+    let devices = makePairedDeviceStore(paths: paths, signer: signer)
+    // Every request is also published for paired phones; the first answer wins.
+    let feed = ApprovalFeed(path: paths.approvalFeed, log: log, devices: devices, confirmPairing:
+        Pairing.confirmer(devices: devices, signer: signer, autoPair: TestKnobs.value("OPPROXY_TEST_AUTO_PAIR") != nil))
+    let approver = FanoutApprover(local: local, feed: feed)
     guard let executable = Bundle.main.executablePath else { fail("cannot find my own executable") }
     let auth = AuthTracker(executable: executable, log: log,
                            pollInterval: Double(TestKnobs.value("OPPROXY_POLL_SECONDS") ?? "") ?? 60,
                            autoAuthorize: TestKnobs.value("OPPROXY_NO_AUTO_AUTH") == nil)
-    let daemon = Daemon(paths: paths, approver: approver, log: log, auth: auth)
+    let daemon = Daemon(paths: paths, approver: approver, log: log, auth: auth, signer: signer, devices: devices)
     let systemEvents = LockDiagnostics.logSystemEvents(to: log)
     // Attached before start(): the startup authorization is the first prompt it explains.
     let authContext = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? AuthContextPanel(expiresIn: AuthWindow.hardCap, log: log) : nil
     auth.promptObserver = authContext
     do { try daemon.start() } catch { fail("could not start: \(error)") }
+    do { try feed.start() } catch { log.write("could not start the approval feed: \(error)") }
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let menuBar = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? MenuBarController(daemon: daemon) : nil
@@ -92,13 +101,17 @@ case "keygen":
 case "render-dialog":
     DialogPreview.render(to: URL(fileURLWithPath: arguments.dropFirst(2).first { !$0.hasPrefix("-") } ?? "."),
                          onScreen: arguments.contains("--on-screen"))
+
+case "test-feed-client":
+    FeedTestClient.run(Array(arguments.dropFirst(2)))
 #endif
 
 case "session-holder":
     SessionHolder.run(paths: paths)
 
 case "list":
-    let store = makeApprovalStore(paths: paths, signer: makeApprovalSigner(paths: paths))
+    let signer = makeApprovalSigner(paths: paths)
+    let store = makeApprovalStore(paths: paths, signer: signer, devices: makePairedDeviceStore(paths: paths, signer: signer))
     let approvals = store.active.sorted { $0.approvedAt < $1.approvedAt }
     if approvals.isEmpty { print("No active approvals.") }
     if !store.rejected.isEmpty { print("Ignoring \(store.rejected.count) entr\(store.rejected.count == 1 ? "y" : "ies") with invalid signatures.") }
@@ -114,11 +127,36 @@ case "list":
 
 case "revoke":
     guard let target = arguments.dropFirst(2).first else { fail("usage: opProxy revoke --all | <session-id>") }
-    let store = makeApprovalStore(paths: paths, signer: makeApprovalSigner(paths: paths))
+    let signer = makeApprovalSigner(paths: paths)
+    let store = makeApprovalStore(paths: paths, signer: signer, devices: makePairedDeviceStore(paths: paths, signer: signer))
     do {
         let n = try store.revoke { target == "--all" || $0.key.sessionId == target }
         print("Revoked \(n) approval\(n == 1 ? "" : "s").")
     } catch { fail("could not update \(paths.approvals.path): \(error)") }
+
+case "devices":
+    let devices = makePairedDeviceStore(paths: paths, signer: makeApprovalSigner(paths: paths))
+    let f = DateFormatter()
+    f.dateFormat = "MMM d HH:mm"
+    if devices.devices.isEmpty { print("No paired phones.") }
+    if !devices.rejected.isEmpty { print("Ignoring \(devices.rejected.count) entr\(devices.rejected.count == 1 ? "y" : "ies") with invalid signatures.") }
+    for d in devices.devices {
+        print("\(d.name)  \(d.fingerprint)  paired \(f.string(from: d.pairedAt))")
+        print("    key ID \(d.keyId)")
+    }
+
+case "unpair":
+    guard let target = arguments.dropFirst(2).first else { fail("usage: opProxy unpair --all | <key-id-prefix>") }
+    let devices = makePairedDeviceStore(paths: paths, signer: makeApprovalSigner(paths: paths))
+    // A fingerprint as shown ("ab12 cd34") is a key ID prefix once the spaces are gone.
+    let prefix = target.lowercased().replacingOccurrences(of: " ", with: "")
+    let matches = devices.devices.filter { target == "--all" || $0.keyId.hasPrefix(prefix) }
+    if target != "--all", matches.count > 1 { fail("\(target) matches \(matches.count) phones; give more of the key ID") }
+    do {
+        let ids = Set(matches.map(\.keyId))
+        let n = try devices.unpair { target == "--all" || ids.contains($0.keyId) }
+        print("Unpaired \(n) phone\(n == 1 ? "" : "s"). Approvals made on \(n == 1 ? "it" : "them") no longer verify.")
+    } catch { fail("could not update \(paths.pairedDevices.path): \(error)") }
 
 case "status", "refresh":
     let refresh = arguments[1] == "refresh"

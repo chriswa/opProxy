@@ -60,7 +60,7 @@ DAEMON_PID=
 start_daemon() { # decision [delay]
   stop_daemon
   OPPROXY_NO_AUTO_AUTH=${OPPROXY_NO_AUTO_AUTH-1} OPPROXY_NO_MENU_BAR=1 OPPROXY_POLL_SECONDS=1 OPPROXY_TERMINAL_IDLE=${OPPROXY_TERMINAL_IDLE:-600} OPPROXY_TEST_APPROVER=$1 OPPROXY_TEST_DELAY=${2:-0} \
-    OPPROXY_OP_REQUIREMENT=${OP_REQUIREMENT-none} OPPROXY_TEST_SWAP_OP=${OPPROXY_TEST_SWAP_OP:-} \
+    OPPROXY_OP_REQUIREMENT=${OP_REQUIREMENT-none} OPPROXY_TEST_SWAP_OP=${OPPROXY_TEST_SWAP_OP:-} OPPROXY_TEST_AUTO_PAIR=1 \
     "$DAEMON_BIN" daemon & DAEMON_PID=$!
   for _ in $(seq 50); do [ -S "$OPPROXY_HOME/daemon.sock" ] && return; sleep 0.1; done
   echo "daemon did not start"; exit 1
@@ -202,6 +202,68 @@ for a in json.load(open(sys.argv[1])):
         f = lambda s: datetime.fromisoformat(s.replace('Z', '+00:00'))
         print(int((f(a['expiresAt']) - f(a['approvedAt'])).total_seconds()))" "$OPPROXY_HOME/approvals.json")
 check "1 hour: stored with a signed 1-hour expiry" [ "$ttl" = 3600 ]
+start_daemon approved 1
+
+# --- the approval feed: a paired phone answers before the (scripted, 30s late) dialog
+FEED="$OPPROXY_HOME/approval-feed.sock"
+phone() { "$BIN" test-feed-client "$FEED" "$@"; }
+ask() { # session, then the phone's arguments; leaves the request's output in $WORK/asked
+  local sid=$1; shift
+  SID=$sid agent "$OP" read op://phone/item/field > "$WORK/asked" 2>&1 & local apid=$!
+  res=$(phone "$@"); wait $apid; asked_rc=$?
+}
+start_daemon denied 30
+ask sess-P approve once --doc "$WORK/phone-doc.json"
+check "phone once: reply accepted" [ "$res" = '{"id":"'"$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$res")"'","ok":true,"type":"reply-result"}' ]
+check "phone once: request ran" via_daemon "$(cat "$WORK/asked")"
+check "phone once: nothing stored" not_in "sess-P" "$OPPROXY_HOME/approvals.json"
+check "phone once: logged" grep -q "phone approve once: Test Phone" "$LOG"
+check "phone: document headlines the item" grep -q '"title":"item"' "$WORK/phone-doc.json"
+check "phone: document offers the dialog's options" grep -q '"default":"7d","id":"duration","label":"Allow","options":\[{"hint":"Runs this one request' "$WORK/phone-doc.json"
+check "phone: document confirms what approving grants" grep -q '"confirm":"Let Claude Code .*read phone/item/field"' "$WORK/phone-doc.json"
+
+ask sess-Q approve 7d
+check "phone 7d: request ran" via_daemon "$(cat "$WORK/asked")"
+out=$(SID=sess-Q agent "$OP" read op://phone/item/field)
+check "phone 7d: repeat runs without a prompt" [ "$(count 'prompting: claude:sess-Q')" = 1 ]
+check "phone 7d: repeat ran" via_daemon "$out"
+check "phone 7d: stored with the phone's proof" python3 -c "
+import json, sys; from datetime import datetime
+f = lambda s: datetime.fromisoformat(s.replace('Z', '+00:00'))
+[a] = [a for a in json.load(open(sys.argv[1])) if a['key']['sessionId'] == 'sess-Q']
+assert a['deviceProof']['keyId'] and 'signature' not in a, a
+assert (f(a['expiresAt']) - f(a['approvedAt'])).total_seconds() == 7 * 86400" "$OPPROXY_HOME/approvals.json"
+check "phone 7d: devices lists the phone" grep -q "^Test Phone  [0-9a-f]\{4\} " <<<"$("$BIN" devices)"
+python3 - "$OPPROXY_HOME/approvals.json" <<'PY'
+import json, sys
+entries = json.load(open(sys.argv[1]))
+for a in entries:
+    if a['key']['sessionId'] == 'sess-Q': a['expiresAt'] = '2099-01-01T00:00:00Z'
+json.dump(entries, open(sys.argv[1] + '.edited', 'w'))
+PY
+check "phone 7d: an extended expiry doesn't verify" grep -q "Ignoring 1 entry with invalid signatures" <<<"$(cp "$OPPROXY_HOME/approvals.json" "$WORK/approvals.saved"; cp "$OPPROXY_HOME/approvals.json.edited" "$OPPROXY_HOME/approvals.json"; "$BIN" list; cp "$WORK/approvals.saved" "$OPPROXY_HOME/approvals.json")"
+start_daemon denied
+SID=sess-Q agent "$OP" read op://phone/item/field >/dev/null 2>&1
+check "phone 7d: still approved after a restart" [ "$(count 'prompting: claude:sess-Q')" = 1 ]
+"$BIN" unpair --all >/dev/null
+SID=sess-Q agent "$OP" read op://phone/item/field >/dev/null 2>&1
+check "unpair: the phone's approvals stop working" [ "$(count 'prompting: claude:sess-Q')" = 2 ]
+"$BIN" revoke sess-Q >/dev/null  # now unverifiable; later checks count invalid entries
+
+start_daemon approved 30
+ask sess-R deny
+check "phone deny: request fails" [ "$asked_rc" = 1 ]
+check "phone deny: explains to the agent" grep -q "user denied" "$WORK/asked"
+ask sess-S approve once --twice
+check "phone twice: first reply accepted" grep -q '"ok":true' <<<"$(head -1 <<<"$res")"
+check "phone twice: second refused" grep -q '"error":"That request was already answered.","id":".*","ok":false' <<<"$(tail -1 <<<"$res")"
+SID=sess-T agent "$OP" read op://phone/item/field > "$WORK/asked" 2>&1 & apid=$!
+res=$(phone approve once --unpaired)
+check "unpaired phone: refused" grep -q "This phone isn't paired with opProxy." <<<"$res"
+res=$(phone approve once --tamper-hash)
+check "tampered document hash: refused" grep -q "The phone's copy of this request isn't one opProxy sent." <<<"$res"
+res=$(phone deny); wait $apid
+check "refused replies: request still answerable" grep -q "user denied" "$WORK/asked"
 start_daemon approved 1
 
 # --- approvals persist across daemon restarts

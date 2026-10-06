@@ -28,6 +28,10 @@ public struct Paths {
 
     /// Secure Enclave key blob that signs approvals.
     public var approvalKey: URL { stateDir.appendingPathComponent("approval-key.se") }
+    /// Where pending approvals are published for the Spaceterm phone app (APPROVAL_FEED.md).
+    public var approvalFeed: URL { stateDir.appendingPathComponent("approval-feed.sock") }
+    /// Phones allowed to answer approvals, each entry signed with the approval key.
+    public var pairedDevices: URL { stateDir.appendingPathComponent("paired-devices.json") }
 
     public init(environment env: [String: String] = ProcessInfo.processInfo.environment) {
         let home = FileManager.default.homeDirectoryForCurrentUser

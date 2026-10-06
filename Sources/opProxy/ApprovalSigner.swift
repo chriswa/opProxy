@@ -89,9 +89,16 @@ func makeApprovalSigner(paths: Paths) -> ApprovalSigner? {
     #endif
 }
 
-/// A store that only honours entries signed by `signer`.
-func makeApprovalStore(paths: Paths, signer: ApprovalSigner?) -> ApprovalStore {
-    ApprovalStore(url: paths.approvals) { payload, signature in
+/// A store that only honours entries signed by `signer`, or approved on a phone in `devices`.
+func makeApprovalStore(paths: Paths, signer: ApprovalSigner?, devices: PairedDeviceStore) -> ApprovalStore {
+    ApprovalStore(url: paths.approvals, verify: { payload, signature in
+        signer?.verify(payload, signature: signature) ?? false
+    }, verifyDevice: { DeviceProofCheck.verify($0, device: devices.device(keyId:)) })
+}
+
+/// Paired phones, honoured only when `signer` signed their entry.
+func makePairedDeviceStore(paths: Paths, signer: ApprovalSigner?) -> PairedDeviceStore {
+    PairedDeviceStore(url: paths.pairedDevices) { payload, signature in
         signer?.verify(payload, signature: signature) ?? false
     }
 }

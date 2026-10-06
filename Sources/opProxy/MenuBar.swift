@@ -12,6 +12,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let refreshItem = NSMenuItem(title: "Refresh Now", action: #selector(refresh), keyEquivalent: "")
     private let installedItem = NSMenuItem(title: "Installed", action: #selector(toggleInstalled), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Open at Login", action: #selector(toggleLogin), keyEquivalent: "")
+    /// Phones that can answer from the approval feed; its submenu is rebuilt each time.
+    private let phonesItem = NSMenuItem(title: "Paired Phones", action: nil, keyEquivalent: "")
     /// Recent approvals and Revoke All, rebuilt each time the menu opens.
     private var approvalItems: [NSMenuItem] = []
     private var refreshing = false
@@ -36,7 +38,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let quitItem = NSMenuItem(title: "Quit opProxy", action: #selector(quitApp), keyEquivalent: "")
         quitItem.target = self
         quitItem.toolTip = "op calls go straight to 1Password until opProxy is opened again or you log in"
-        [statusLine, detailLine, .separator(), refreshItem, .separator(), .separator(), installedItem, loginItem,
+        [statusLine, detailLine, .separator(), refreshItem, .separator(), .separator(), phonesItem, installedItem, loginItem,
          .separator(), restartItem, quitItem].forEach(menu.addItem)
         menu.delegate = self
         item.menu = menu
@@ -52,6 +54,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         render()
         rebuildApprovals(in: menu)
+        rebuildPhones()
         // Names for approvals stored under a bare ID; shows up the next time the menu opens.
         DispatchQueue.global().async { [daemon] in daemon.repairItemLabels() }
     }
@@ -168,6 +171,33 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 }
             }
         }
+    }
+
+    // MARK: Paired phones
+
+    private func rebuildPhones() {
+        let submenu = NSMenu()
+        submenu.autoenablesItems = false
+        let phones = daemon.devices.devices
+        if phones.isEmpty {
+            let none = NSMenuItem(title: "No Paired Phones", action: nil, keyEquivalent: "")
+            none.isEnabled = false
+            submenu.addItem(none)
+        }
+        for phone in phones {
+            let item = NSMenuItem(title: "Unpair \(phone.name) · \(phone.fingerprint)", action: #selector(unpair(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = phone.keyId
+            item.toolTip = "Its lasting approvals stop working too"
+            submenu.addItem(item)
+        }
+        phonesItem.submenu = submenu
+    }
+
+    @objc private func unpair(_ sender: NSMenuItem) {
+        guard let keyId = sender.representedObject as? String else { return }
+        do { try daemon.devices.unpair { $0.keyId == keyId } } catch { lastError = "Unpair failed: \(error)" }
+        render()
     }
 
     private func actionItem(_ title: String, _ revocation: Daemon.Revocation) -> NSMenuItem {

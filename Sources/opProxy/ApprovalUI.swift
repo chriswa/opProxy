@@ -7,12 +7,13 @@ import OpProxyCore
 /// Touch ID the moment it appears: the fingerprint glyph is embedded in the panel
 /// (LAAuthenticationView), so there's no system sheet and no button to click. Touch ID also
 /// authorizes signing the approval. Deny or the timeout denies.
-final class DialogApprover: Approver {
+final class DialogApprover: LocalApprover {
     static let timeout: TimeInterval = 110
 
     /// Requests waiting behind the one on screen; only one dialog is ever shown.
     private var queue: [(ApprovalPrompt, (Decision) -> Void)] = []
     private var current: ApprovalSession?
+    var onCountdown: ((DialogKey, Date) -> Void)?
 
     func requestApproval(_ prompt: ApprovalPrompt, completion: @escaping (Decision) -> Void) {
         DispatchQueue.main.async { [self] in
@@ -31,18 +32,32 @@ final class DialogApprover: Approver {
         }
     }
 
+    func dismiss(_ key: DialogKey) {
+        DispatchQueue.main.async { [self] in
+            abandoned.remove(key)
+            if current?.prompt.key == key {
+                current?.dismiss()  // ends the session, which shows the next
+            } else {
+                queue.removeAll { $0.0.key == key }
+                current?.setWaiting(queue.count)
+            }
+        }
+    }
+
     private func showNext() {
         guard current == nil, !queue.isEmpty else { return }
         let (prompt, completion) = queue.removeFirst()
         let session = ApprovalSession(prompt: prompt, timeout: Self.timeout) { [self] decision in
-            completion(decision)
+            // nil: dismissed because it was answered elsewhere.
+            if let decision { completion(decision) }
             current = nil
             showNext()
         }
         current = session
-        session.begin()
+        let deadline = session.begin()
         session.setWaiting(queue.count)
         if abandoned.remove(prompt.key) != nil { session.markAbandoned() }
+        onCountdown?(prompt.key, deadline)
     }
 }
 
@@ -50,7 +65,7 @@ final class DialogApprover: Approver {
 private final class ApprovalSession: NSObject, ApprovalViewActions {
     let prompt: ApprovalPrompt
     let timeout: TimeInterval
-    let onDecision: (Decision) -> Void
+    let onDecision: (Decision?) -> Void
     private var context: LAContext?
     private var panel: NSPanel?
     private var view: ApprovalView?
@@ -58,13 +73,14 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
     private var ticker: Timer?
     private var retainSelf: ApprovalSession?
 
-    init(prompt: ApprovalPrompt, timeout: TimeInterval, onDecision: @escaping (Decision) -> Void) {
+    init(prompt: ApprovalPrompt, timeout: TimeInterval, onDecision: @escaping (Decision?) -> Void) {
         self.prompt = prompt
         self.timeout = timeout
         self.onDecision = onDecision
     }
 
-    func begin() {
+    /// Returns when the countdown runs out.
+    func begin() -> Date {
         retainSelf = self
         let context = LAContext()
         let view = ApprovalView(prompt: prompt, actions: self, authContext: context)
@@ -95,6 +111,7 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
             let left = deadline.timeIntervalSinceNow
             if left <= 0 { finish(.timedOut) } else { self.view?.setRemaining(Int(left.rounded(.up))) }
         }
+        return deadline
     }
 
     /// Evaluating the approval key's own access control means this Touch ID also authorizes
@@ -102,11 +119,11 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
     private func listen(with context: LAContext) {
         self.context = context
         context.evaluateAccessControl(EnclaveSigner.accessControl(), operation: .useKeySign,
-                                      localizedReason: touchIDReason) { ok, error in
+                                      localizedReason: prompt.touchIDReason) { ok, error in
             DispatchQueue.main.async { [self] in
                 guard !decided else { return }
                 if ok {
-                    finish(.approved(context, view?.selectedScope ?? .once))
+                    finish(.approved(.touchID(context), view?.selectedScope ?? .once))
                 } else {
                     let reason = (error as? LAError).map(Self.describe) ?? "Touch ID didn't approve"
                     view?.showRetry(note: "\(reason). Try again, or deny.")
@@ -133,6 +150,9 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
 
     func deny() { finish(.denied) }
 
+    /// Answered elsewhere: closes without a decision of its own.
+    func dismiss() { finish(nil) }
+
     func setWaiting(_ count: Int) { view?.setWaiting(count) }
 
     func markAbandoned() { view?.showAbandoned() }
@@ -141,7 +161,7 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
         if let url = prompt.requester.spacetermURL { NSWorkspace.shared.open(url) }
     }
 
-    private func finish(_ decision: Decision) {
+    private func finish(_ decision: Decision?) {
         guard !decided else { return }
         decided = true
         ticker?.invalidate()
@@ -151,12 +171,6 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
         panel = nil
         onDecision(decision)
         retainSelf = nil
-    }
-
-    /// Completes the system's "opProxy is trying to …" sentence.
-    private var touchIDReason: String {
-        let who = prompt.requester.surfaceLabel.map { "\(prompt.requester.name) “\($0)”" } ?? prompt.requester.name
-        return "let \(who) \(prompt.description.summary)"
     }
 }
 
@@ -178,7 +192,7 @@ final class ApprovalView: NSView {
     private let authSlot = NSView()
     private let waitingLabel = NSTextField(labelWithString: "")
     private let durationControl = NSSegmentedControl()
-    private var durations: [(label: String, scope: ApprovalScope, hint: String)] = []
+    private var durations: [ApprovalOption] = []
     private var defaultDuration = 0
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let abandonedNote = NSTextField(wrappingLabelWithString:
@@ -428,25 +442,13 @@ final class ApprovalView: NSView {
     /// What Touch ID will grant; chosen before touching.
     var selectedScope: ApprovalScope { durations[max(0, durationControl.selectedSegment)].scope }
 
+    /// "Touch ID runs this one request…": the shared hint, said of Touch ID.
+    private func hintText(_ option: ApprovalOption) -> String {
+        "Touch ID " + option.hint.prefix(1).lowercased() + option.hint.dropFirst()
+    }
+
     private func footer(_ prompt: ApprovalPrompt) -> NSView {
-        switch prompt.requester {
-        case .agent:
-            durations = [
-                ("Once", .once, "Touch ID runs this one request and remembers nothing."),
-                ("1 Hour", .lasting(3600), "Touch ID approves this exact command in this agent session for 1 hour."),
-                ("7 Days", .lasting(ApprovalStore.defaultTTL), "Touch ID approves this exact command in this agent session for 7 days."),
-                ("3 Months", .lasting(90 * 24 * 3600.0), "Touch ID approves this exact command in this agent session for 3 months."),
-                ("Forever", .lasting(ApprovalStore.forever.timeIntervalSinceNow),
-                 "Touch ID approves this exact command for as long as this agent session runs."),
-            ]
-            defaultDuration = 2
-        case .terminal:
-            durations = [
-                ("Once", .once, "Touch ID runs this one request and remembers nothing."),
-                ("This Tab", .tab, "Touch ID approves reads from this terminal tab until it's unused for 10 minutes (12 hours at most)."),
-            ]
-            defaultDuration = 1
-        }
+        (durations, defaultDuration) = ApprovalOptions.for(prompt.requester)
         durationControl.segmentCount = durations.count
         for (i, d) in durations.enumerated() { durationControl.setLabel(d.label, forSegment: i) }
         durationControl.trackingMode = .selectOne
@@ -458,7 +460,7 @@ final class ApprovalView: NSView {
         let durationRow = NSStackView(views: [allow, durationControl])
         durationRow.orientation = .horizontal
         durationRow.spacing = 10
-        hint.stringValue = durations[defaultDuration].hint
+        hint.stringValue = hintText(durations[defaultDuration])
 
         hint.font = .systemFont(ofSize: 11)
         hint.textColor = Caution.secondary
@@ -496,7 +498,7 @@ final class ApprovalView: NSView {
         return row
     }
 
-    @objc private func durationChanged() { hint.stringValue = durations[durationControl.selectedSegment].hint }
+    @objc private func durationChanged() { hint.stringValue = hintText(durations[durationControl.selectedSegment]) }
     @objc private func retry() { actions?.retry() }
     @objc private func deny() { actions?.deny() }
     @objc private func openSession() { actions?.openSession() }
@@ -705,7 +707,7 @@ final class HazardStripe: NSView {
     }
 }
 
-private func shellQuote(_ s: String) -> String {
+func shellQuote(_ s: String) -> String {
     let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_./:=@,+%"))
     if !s.isEmpty, s.unicodeScalars.allSatisfy(safe.contains) { return s }
     return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -713,10 +715,11 @@ private func shellQuote(_ s: String) -> String {
 
 /// For tests: decides without UI, per `OPPROXY_TEST_APPROVER`. Logs what the dialog would
 /// show so tests can assert on it.
-final class ScriptedApprover: Approver {
+final class ScriptedApprover: LocalApprover {
     let decision: Decision
     let delay: TimeInterval
     let log: Log
+    var onCountdown: ((DialogKey, Date) -> Void)?
 
     init(decision: Decision, delay: TimeInterval, log: Log) {
         self.decision = decision
@@ -746,8 +749,13 @@ final class ScriptedApprover: Approver {
         if let data = try? JSONSerialization.data(withJSONObject: fields, options: [.sortedKeys]) {
             log.write("dialog: " + String(decoding: data, as: UTF8.self))
         }
+        // As if its dialog were on screen at once, counting down to the scripted answer.
+        onCountdown?(prompt.key, Date().addingTimeInterval(delay))
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [decision] in completion(decision) }
     }
 
     func requestersLeft(_ key: DialogKey) {}
+
+    /// The scripted answer still arrives later; `FanoutApprover` ignores it.
+    func dismiss(_ key: DialogKey) {}
 }
