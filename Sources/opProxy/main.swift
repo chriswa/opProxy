@@ -124,8 +124,7 @@ case "list":
         case .process(let agent, let instance): print("\(agent.displayName) process \(instance)\(label)")
         case .allAgents: print("All agents")
         }
-        let env = a.key.env.map { "\($0.key)=\($0.value) " }.sorted().joined()
-        print("    \(env)op \(a.key.argv.joined(separator: " "))")
+        print("    \(a.label)  (item \(a.key.item.itemId), vault \(a.key.item.vaultId)\(a.key.item.account.map { ", account \($0)" } ?? ""))")
         print("    approved \(f.string(from: a.approvedAt)), expires \(f.string(from: a.expiresAt))")
     }
 

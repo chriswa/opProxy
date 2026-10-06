@@ -9,9 +9,12 @@ public enum Routing: Equatable {
 }
 
 public struct ProxyPlan: Equatable {
-    public let requiresApproval: Bool
-    /// What the daemon runs. Differs from the caller's argv only when the caller asked for
-    /// `--out-file`: the daemon's cwd is not the caller's, so the shim writes the file.
+    /// Set for commands that can return secret values, which need the user's approval: the
+    /// one item they read. Nil for metadata.
+    public let item: ItemRequest?
+    /// The caller's argv without `--out-file` and its companions: the daemon's cwd is not the
+    /// caller's, so the shim writes the file. For an item request the daemon runs this with
+    /// the item pinned to its IDs.
     public let daemonArgv: [String]
     public let outFile: OutFile?
 }
@@ -79,7 +82,7 @@ public struct OpCommand: Equatable {
 
     public var routing: Routing {
         let path = subcommand.joined(separator: " ")
-        guard let requiresApproval = Self.proxiedCommands[path] else {
+        guard let readsSecrets = Self.proxiedCommands[path] else {
             return .passthrough(reason: "`op \(path)` is not a read-only command opProxy handles")
         }
         // The daemon has no stdin and a different cwd and config.
@@ -87,18 +90,22 @@ public struct OpCommand: Equatable {
         for flag in ["--config", "--session", "--help", "-h"] where flags[flag] != nil {
             return .passthrough(reason: "uses \(flag)")
         }
-        let outPath = flags["--out-file"] ?? flags["-o"]
-        guard let outPath else {
-            return .proxy(ProxyPlan(requiresApproval: requiresApproval, daemonArgv: argv, outFile: nil))
+        var daemonArgv = argv
+        var outFile: OutFile?
+        if let outPath = flags["--out-file"] ?? flags["-o"] {
+            guard path == "read" || path == "document get", !outPath.isEmpty else {
+                return .passthrough(reason: "uses --out-file")
+            }
+            let mode = flags["--file-mode"].flatMap { Int($0, radix: 8) } ?? 0o600
+            let force = flags["--force"] != nil || flags["-f"] != nil
+            daemonArgv = Self.removingFileFlags(argv)
+            outFile = OutFile(path: outPath, mode: mode, force: force)
         }
-        guard path == "read" || path == "document get", !outPath.isEmpty else {
-            return .passthrough(reason: "uses --out-file")
+        guard readsSecrets else { return .proxy(ProxyPlan(item: nil, daemonArgv: daemonArgv, outFile: outFile)) }
+        switch ItemRequest.parse(daemonArgv) {
+        case .success(let item): return .proxy(ProxyPlan(item: item, daemonArgv: daemonArgv, outFile: outFile))
+        case .failure(let unsupported): return .passthrough(reason: unsupported.reason)
         }
-        let mode = flags["--file-mode"].flatMap { Int($0, radix: 8) } ?? 0o600
-        let force = flags["--force"] != nil || flags["-f"] != nil
-        return .proxy(ProxyPlan(requiresApproval: requiresApproval,
-                                daemonArgv: Self.removingFileFlags(argv),
-                                outFile: OutFile(path: outPath, mode: mode, force: force)))
     }
 
     static func removingFileFlags(_ argv: [String]) -> [String] {
@@ -117,8 +124,8 @@ public struct OpCommand: Equatable {
         return out
     }
 
-    /// Read-only commands the daemon runs, and whether each needs the user's approval: only
-    /// the ones that can return secret values do. Listings and account metadata don't.
+    /// Read-only commands the daemon runs, and whether each can return secret values, which
+    /// need the user's approval. Listings and account metadata don't.
     /// Everything else (run, inject, item share, signin, plugin run, writes, …) never runs in
     /// the daemon's authorized session, so 1Password prompts for it as usual.
     static let proxiedCommands: [String: Bool] = [
@@ -133,119 +140,6 @@ public struct OpCommand: Equatable {
         "account list": false,
         "account get": false,
     ]
-
-    // MARK: - Description for the approval dialog
-
-    public struct Detail: Equatable {
-        public enum Style: Equatable {
-            case normal
-            /// A default standing in for a missing value, e.g. "any vault".
-            case placeholder
-        }
-
-        public let label: String
-        public let value: String
-        public let style: Style
-
-        public init(label: String, value: String, style: Style = .normal) {
-            self.label = label
-            self.value = value
-            self.style = style
-        }
-    }
-
-    public struct Description: Equatable {
-        /// e.g. "Read a secret".
-        public let action: String
-        /// The item or document being accessed: what the user is really approving.
-        public let subject: String?
-        /// Everything else about the request.
-        public let details: [Detail]
-        /// Completes "opProxy is trying to let Claude … <summary>" in the Touch ID prompt.
-        public let summary: String
-
-        init(action: String, subject: String? = nil, details: [Detail], summary: String) {
-            self.action = action
-            self.subject = subject
-            self.details = details
-            self.summary = summary
-        }
-    }
-
-    public var description: Description {
-        let account = flags["--account"].map { [Detail(label: "Account", value: $0)] } ?? []
-        switch subcommand.joined(separator: " ") {
-        case "read":
-            if let ref = positionals.first, let parsed = SecretReference(ref) {
-                var details = [Detail(label: "Vault", value: parsed.vault)]
-                if let section = parsed.section { details.append(Detail(label: "Section", value: section)) }
-                details.append(Detail(label: "Field", value: parsed.field))
-                if let query = parsed.query { details.append(Detail(label: "Options", value: query)) }
-                return Description(action: "Read a secret", subject: parsed.item, details: details + account,
-                                   summary: "read \(parsed.vault)/\(parsed.item)/\(parsed.field)")
-            }
-        case "item get":
-            if let item = positionals.first {
-                let vault = flags["--vault"]
-                let fields = flags["--fields"]
-                var details = [vault.map { Detail(label: "Vault", value: $0) } ?? Detail(label: "Vault", value: "any vault", style: .placeholder)]
-                let fieldNames = fields.map(Self.readableFields)
-                if let fieldNames {
-                    details.append(Detail(label: "Fields", value: fieldNames))
-                } else if flags["--otp"] != nil {
-                    details.append(Detail(label: "Fields", value: "one-time password"))
-                } else {
-                    details.append(Detail(label: "Fields", value: "all fields", style: .placeholder))
-                }
-                let where_ = vault.map { " in \($0)" } ?? ""
-                let what = fieldNames.map { " (\($0))" } ?? (flags["--otp"] != nil ? " (OTP)" : "")
-                return Description(action: "Get an item", subject: item, details: details + account,
-                                   summary: "get “\(item)”\(where_)\(what)")
-            }
-        case "document get":
-            if let doc = positionals.first {
-                let vault = flags["--vault"]
-                return Description(action: "Download a document", subject: doc,
-                                   details: [vault.map { Detail(label: "Vault", value: $0) }
-                                                ?? Detail(label: "Vault", value: "any vault", style: .placeholder)] + account,
-                                   summary: "download document “\(doc)”" + (vault.map { " from \($0)" } ?? ""))
-            }
-        case "item list":
-            let vault = flags["--vault"]
-            var details = [vault.map { Detail(label: "Vault", value: $0) } ?? Detail(label: "Vault", value: "all vaults", style: .placeholder)]
-            if let c = flags["--categories"] { details.append(Detail(label: "Categories", value: c)) }
-            if let t = flags["--tags"] { details.append(Detail(label: "Tags", value: t)) }
-            return Description(action: "List items", details: details + account,
-                               summary: "list items in " + (vault ?? "all vaults"))
-        case "vault list":
-            return Description(action: "List vaults", details: account, summary: "list vaults")
-        case "vault get":
-            if let vault = positionals.first {
-                return Description(action: "Get vault details", details: [Detail(label: "Vault", value: vault)] + account,
-                                   summary: "get vault “\(vault)”")
-            }
-        default:
-            break
-        }
-        return Description(action: "Run a 1Password command", details: account,
-                           summary: "run op " + argv.joined(separator: " "))
-    }
-}
-
-extension OpCommand {
-    /// 1Password's opaque 26-character item and vault IDs, as opposed to names.
-    public static func looksLikeID(_ s: String) -> Bool {
-        s.count == 26 && s.allSatisfy { ($0.isLowercase && $0.isASCII) || $0.isNumber }
-    }
-
-    /// `label=credential,label=username` → "credential, username"; `type=otp` → "type otp".
-    static func readableFields(_ spec: String) -> String {
-        spec.split(separator: ",").map { part -> String in
-            let kv = part.split(separator: "=", maxSplits: 1).map(String.init)
-            guard kv.count == 2 else { return String(part) }
-            return kv[0] == "label" ? kv[1] : "\(kv[0]) \(kv[1])"
-        }.joined(separator: ", ")
-    }
 }
 
 /// `op://vault/item[/section]/field[?query]`
@@ -255,9 +149,11 @@ public struct SecretReference: Equatable {
     public let section: String?
     public let field: String
     public let query: String?
+    private let raw: String
 
     public init?(_ ref: String) {
         guard ref.hasPrefix("op://") else { return nil }
+        raw = ref
         var rest = String(ref.dropFirst("op://".count))
         var query: String?
         if let q = rest.firstIndex(of: "?") {
@@ -271,5 +167,10 @@ public struct SecretReference: Equatable {
         default: return nil
         }
         self.query = query
+    }
+
+    /// This reference with its vault and item replaced by IDs; the rest is kept verbatim.
+    func pinned(vaultId: String, itemId: String) -> String {
+        "op://\(vaultId)/\(itemId)/" + raw.dropFirst("op://\(vault)/\(item)/".count)
     }
 }

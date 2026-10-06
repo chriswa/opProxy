@@ -20,23 +20,23 @@ final class OpCommandTests: XCTestCase {
         for argv in shapes {
             let p = plan(argv)
             XCTAssertNotNil(p, "\(argv)")
-            XCTAssertEqual(p?.requiresApproval, true, "\(argv)")
+            XCTAssertNotNil(p?.item, "\(argv)")
             XCTAssertEqual(p?.daemonArgv, argv)
             XCTAssertNil(p?.outFile)
         }
     }
 
     func testMetadataNeedsNoApproval() {
-        XCTAssertEqual(plan(["whoami"])?.requiresApproval, false)
-        XCTAssertEqual(plan(["whoami", "--account", "acme.1password.com"])?.requiresApproval, false)
-        XCTAssertEqual(plan(["account", "list"])?.requiresApproval, false)
-        XCTAssertEqual(plan(["vault", "list"])?.requiresApproval, false)
-        XCTAssertEqual(plan(["vault", "get", "Private"])?.requiresApproval, false)
-        XCTAssertEqual(plan(["item", "list", "--vault", "Private", "--format", "json"])?.requiresApproval, false)
-        XCTAssertEqual(plan(["item", "list", "--tags", "platform-service"])?.requiresApproval, false)
-        XCTAssertEqual(plan(["document", "list"])?.requiresApproval, false)
-        XCTAssertEqual(plan(["item", "get", "x", "--otp"])?.requiresApproval, true)
-        XCTAssertEqual(plan(["document", "get", "x"])?.requiresApproval, true)
+        XCTAssertNil(plan(["whoami"])?.item)
+        XCTAssertNil(plan(["whoami", "--account", "acme.1password.com"])?.item)
+        XCTAssertNil(plan(["account", "list"])?.item)
+        XCTAssertNil(plan(["vault", "list"])?.item)
+        XCTAssertNil(plan(["vault", "get", "Private"])?.item)
+        XCTAssertNil(plan(["item", "list", "--vault", "Private", "--format", "json"])?.item)
+        XCTAssertNil(plan(["item", "list", "--tags", "platform-service"])?.item)
+        XCTAssertNil(plan(["document", "list"])?.item)
+        XCTAssertNotNil(plan(["item", "get", "x", "--otp"])?.item)
+        XCTAssertNotNil(plan(["document", "get", "x"])?.item)
     }
 
     func testWritesAndUnknownCommandsPassThrough() {
@@ -56,6 +56,16 @@ final class OpCommandTests: XCTestCase {
             ["item", "get", "x", "--help"],
             ["read", "op://A/B/c", "--config", "/tmp/cfg"],
             ["item", "get", "x", "--out-file", "f"],
+            // Secret reads outside the allowlisted shapes
+            ["item", "get", "x", "--share-link"],
+            ["item", "get", "x", "y"],
+            ["item", "get", "--vault", "Private"],
+            ["item", "get", "x", "--fields", "a", "--fields", "b"],
+            ["read", "op://a/b/c", "op://a/b/d"],
+            ["read", "not-a-ref"],
+            ["read", "op://a/b/c", "--vault", "x"],
+            ["document", "get", "x", "--", "y"],
+            ["item", "get", "x", "--debug"],
         ]
         for argv in shapes {
             XCTAssertNil(plan(argv), "\(argv) should pass through")
@@ -72,39 +82,87 @@ final class OpCommandTests: XCTestCase {
         XCTAssertEqual(q.outFile, OutFile(path: "./key.pem", mode: 0o644, force: false))
     }
 
-    func testReadDescription() {
-        let d = OpCommand(argv: ["read", "op://Private/Build Bot GitHub App/add more/App ID"]).description
-        XCTAssertEqual(d.subject, "Build Bot GitHub App")
-        XCTAssertEqual(d.details.map(\.label), ["Vault", "Section", "Field"])
-        XCTAssertEqual(d.details.map(\.value), ["Private", "add more", "App ID"])
-        XCTAssertEqual(d.summary, "read Private/Build Bot GitHub App/App ID")
+    func item(_ argv: [String]) throws -> ItemRequest {
+        try XCTUnwrap(plan(argv)?.item, "\(argv)")
+    }
 
-        let otp = OpCommand(argv: ["read", "op://v/i/one-time password?attribute=otp"]).description
+    static let target = ItemIdentity(itemId: "h3j8k1m6n4p9r2s7t5v0w8x3yz", vaultId: "q4a7m2x9c1v6b3n8z5k0w2e7rt",
+                                     title: "Issue Tracker API key", vaultName: "Private")
+
+    func testItemGetIsPinnedToIDs() throws {
+        let byName = try item(["item", "get", "Issue Tracker API key", "--fields", "label=credential", "--reveal"])
+        XCTAssertEqual(byName.item, "Issue Tracker API key")
+        XCTAssertNil(byName.vault)
+        XCTAssertEqual(byName.pinned(to: Self.target),
+                       ["item", "get", "h3j8k1m6n4p9r2s7t5v0w8x3yz", "--fields", "label=credential", "--reveal",
+                        "--vault", "q4a7m2x9c1v6b3n8z5k0w2e7rt"])
+
+        let withVault = try item(["item", "get", "x", "--vault=private", "--format=json"])
+        XCTAssertEqual(withVault.vault, "private")
+        XCTAssertEqual(withVault.pinned(to: Self.target),
+                       ["item", "get", "h3j8k1m6n4p9r2s7t5v0w8x3yz", "--vault=q4a7m2x9c1v6b3n8z5k0w2e7rt", "--format=json"])
+
+        let account = try item(["--account", "acme", "document", "get", "doc", "--vault", "Private"])
+        XCTAssertEqual(account.account, "acme")
+        XCTAssertEqual(account.pinned(to: Self.target),
+                       ["--account", "acme", "document", "get", "h3j8k1m6n4p9r2s7t5v0w8x3yz", "--vault", "q4a7m2x9c1v6b3n8z5k0w2e7rt"])
+    }
+
+    func testReadIsPinnedToIDs() throws {
+        let r = try item(["read", "-n", "op://Private/Build Bot GitHub App/add more/App ID?attribute=x"])
+        XCTAssertEqual(r.item, "Build Bot GitHub App")
+        XCTAssertEqual(r.vault, "Private")
+        XCTAssertEqual(r.pinned(to: Self.target),
+                       ["read", "-n", "op://q4a7m2x9c1v6b3n8z5k0w2e7rt/h3j8k1m6n4p9r2s7t5v0w8x3yz/add more/App ID?attribute=x"])
+    }
+
+    func testDescriptions() throws {
+        let r = try item(["read", "op://Private/Build Bot GitHub App/add more/App ID"])
+        XCTAssertEqual(r.details.map(\.label), ["Section", "Field"])
+        XCTAssertEqual(r.details.map(\.value), ["add more", "App ID"])
+        XCTAssertEqual(r.summary(Self.target), "read App ID from “Private / Issue Tracker API key”")
+        let otp = try item(["read", "op://v/i/one-time password?attribute=otp"])
         XCTAssertEqual(otp.details.last, .init(label: "Options", value: "attribute=otp"))
+
+        let fields = try item(["item", "get", "Chat webhook", "--vault", "private", "--reveal", "--fields", "label=A,type=otp"])
+        XCTAssertEqual(fields.details, [.init(label: "Fields", value: "A, type otp")])
+        XCTAssertEqual(fields.summary(Self.target), "get A, type otp from “Private / Issue Tracker API key”")
+        let all = try item(["item", "get", "x", "--format", "json"])
+        XCTAssertEqual(all.details, [.init(label: "Fields", value: "all fields", style: .placeholder)])
+        XCTAssertEqual(all.summary(Self.target), "get every field of “Private / Issue Tracker API key”")
+    }
+}
+
+final class ItemCatalogTests: XCTestCase {
+    static let json = Data("""
+        [
+          {"id": "aaaaaaaaaaaaaaaaaaaaaaaaaa", "title": "Chat webhook", "vault": {"id": "v1", "name": "Private"}},
+          {"id": "bbbbbbbbbbbbbbbbbbbbbbbbbb", "title": "Build Bot Tracker App", "vault": {"id": "v1", "name": "Private"}},
+          {"id": "cccccccccccccccccccccccccc", "title": "Build Bot Tracker App", "vault": {"id": "v2", "name": "Engineering"}},
+          {"id": "dddddddddddddddddddddddddd", "title": "Token", "vault": {"id": "v1", "name": "Private"}},
+          {"id": "eeeeeeeeeeeeeeeeeeeeeeeeee", "title": "token", "vault": {"id": "v1", "name": "Private"}}
+        ]
+        """.utf8)
+
+    func id(_ match: ItemCatalog.Match) -> String? {
+        if case .one(let found) = match { return found.itemId }
+        return nil
     }
 
-    func testItemGetDescription() {
-        let d = OpCommand(argv: ["item", "get", "Chat webhook", "--vault", "private", "--reveal", "--fields", "credential"]).description
-        XCTAssertEqual(d.subject, "Chat webhook")
-        XCTAssertEqual(d.summary, "get “Chat webhook” in private (credential)")
-        XCTAssertEqual(d.details.map(\.label), ["Vault", "Fields"])
-        XCTAssertEqual(OpCommand.readableFields("label=A,label=B"), "A, B")
-        XCTAssertEqual(OpCommand.readableFields("type=otp"), "type otp")
-
-        let noVault = OpCommand(argv: ["item", "get", "em5qippbdjh4jgmmhkidhxonka", "--format", "json"]).description
-        XCTAssertTrue(noVault.details.contains(.init(label: "Vault", value: "any vault", style: .placeholder)))
-        XCTAssertTrue(noVault.details.contains(.init(label: "Fields", value: "all fields", style: .placeholder)))
-    }
-
-    func testLooksLikeID() {
-        XCTAssertTrue(OpCommand.looksLikeID("a8d2f6g1h9j4k7l3m5n0p2q6rs"))
-        XCTAssertFalse(OpCommand.looksLikeID("Issue Tracker API key"))
-        XCTAssertFalse(OpCommand.looksLikeID("Private"))
-    }
-
-    func testUnparseableReferenceFallsBackToRawCommand() {
-        let d = OpCommand(argv: ["read", "not-a-ref"]).description
-        XCTAssertEqual(d.summary, "run op read not-a-ref")
+    func testResolution() throws {
+        let catalog = try ItemCatalog(json: Self.json)
+        XCTAssertEqual(id(catalog.resolve(item: "aaaaaaaaaaaaaaaaaaaaaaaaaa", vault: nil)), "aaaaaaaaaaaaaaaaaaaaaaaaaa")
+        XCTAssertEqual(id(catalog.resolve(item: "Chat webhook", vault: "private")), "aaaaaaaaaaaaaaaaaaaaaaaaaa", "vault name in any case")
+        XCTAssertEqual(id(catalog.resolve(item: "chat webhook", vault: nil)), "aaaaaaaaaaaaaaaaaaaaaaaaaa", "title in any case")
+        XCTAssertEqual(id(catalog.resolve(item: "Slack", vault: nil)), nil, "never a substring")
+        XCTAssertEqual(catalog.resolve(item: "Chat webhook", vault: "Engineering"), .none)
+        XCTAssertEqual(id(catalog.resolve(item: "Build Bot Tracker App", vault: "v2")), "cccccccccccccccccccccccccc")
+        guard case .many(let both) = catalog.resolve(item: "Build Bot Tracker App", vault: nil) else {
+            return XCTFail("a title in two vaults is ambiguous")
+        }
+        XCTAssertEqual(both.map(\.vaultName), ["Private", "Engineering"])
+        XCTAssertEqual(id(catalog.resolve(item: "token", vault: nil)), "eeeeeeeeeeeeeeeeeeeeeeeeee", "an exact title wins")
+        if case .many = catalog.resolve(item: "TOKEN", vault: nil) {} else { XCTFail("two titles differing only in case") }
     }
 }
 
@@ -170,7 +228,7 @@ final class ApprovalStoreTests: XCTestCase {
     }
     override func tearDown() { try? FileManager.default.removeItem(at: url) }
 
-    let key = ApprovalKey(audience: .session(agent: .claude, sessionId: "s"), argv: ["read", "op://a/b/c"], env: [:])
+    let key = ApprovalKey(audience: .session(agent: .claude, sessionId: "s"), item: ItemRef(account: nil, vaultId: "v", itemId: "i"))
     // Stand-in for the Secure Enclave signature: a keyed hash only the test knows.
     static func fakeSign(_ d: Data) -> Data { Data((d + Data("secret".utf8)).reversed()) }
     static let fakeVerify: (Data, Data) -> Bool = { fakeSign($0) == $1 }
@@ -178,10 +236,12 @@ final class ApprovalStoreTests: XCTestCase {
         ApprovalStore(url: url, now: now, verify: Self.fakeVerify)
     }
 
-    func variant(_ audience: ApprovalAudience = .session(agent: .claude, sessionId: "s"), argv: [String]? = nil,
-                 env: [String: String] = [:]) -> ApprovalKey {
-        ApprovalKey(audience: audience, argv: argv ?? key.argv, env: env)
+    func variant(_ audience: ApprovalAudience = .session(agent: .claude, sessionId: "s"), item: ItemRef? = nil) -> ApprovalKey {
+        ApprovalKey(audience: audience, item: item ?? key.item)
     }
+
+    static let otherItem = ItemRef(account: nil, vaultId: "v", itemId: "other")
+    static let otherAccount = ItemRef(account: "acme", vaultId: "v", itemId: "i")
 
     func testExactKeyAndDay() throws {
         var now = Date(timeIntervalSince1970: 1_000_000)
@@ -193,8 +253,8 @@ final class ApprovalStoreTests: XCTestCase {
         XCTAssertFalse(store.isApproved(variant(.session(agent: .claude, sessionId: "other"))))
         XCTAssertFalse(store.isApproved(variant(.session(agent: .codex, sessionId: "s"))))
         XCTAssertFalse(store.isApproved(variant(.process(agent: .claude, instance: "10@1"))))
-        XCTAssertFalse(store.isApproved(variant(argv: key.argv + ["-n"])))
-        XCTAssertFalse(store.isApproved(variant(env: ["OP_ACCOUNT": "x"])))
+        XCTAssertFalse(store.isApproved(variant(item: Self.otherItem)))
+        XCTAssertFalse(store.isApproved(variant(item: Self.otherAccount)))
 
         now += 24 * 3600 - 1
         XCTAssertTrue(self.store(now: { now }).isApproved(key), "persists across instances")
@@ -202,15 +262,15 @@ final class ApprovalStoreTests: XCTestCase {
         XCTAssertFalse(store.isApproved(key), "expires after a day")
     }
 
-    func testAllAgentsCoversEveryAudienceForThatCommandOnly() throws {
+    func testAllAgentsCoversEveryAudienceForThatItemOnly() throws {
         let store = store()
         try store.approve(key.reaching(.allAgents), lifetime: .forever, sessionLabel: nil, grantedTo: key.audience,
                           sign: Self.fakeSign)
         XCTAssertTrue(store.isApproved(key))
         XCTAssertTrue(store.isApproved(variant(.session(agent: .codex, sessionId: "x"))))
         XCTAssertTrue(store.isApproved(variant(.process(agent: .cursor, instance: "1@1"))))
-        XCTAssertFalse(store.isApproved(variant(argv: key.argv + ["-n"])))
-        XCTAssertFalse(store.isApproved(variant(.session(agent: .codex, sessionId: "x"), env: ["OP_ACCOUNT": "x"])))
+        XCTAssertFalse(store.isApproved(variant(item: Self.otherItem)))
+        XCTAssertFalse(store.isApproved(variant(.session(agent: .codex, sessionId: "x"), item: Self.otherAccount)))
         XCTAssertEqual(store.active.first?.grantedTo, key.audience)
     }
 

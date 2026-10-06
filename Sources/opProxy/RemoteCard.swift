@@ -11,7 +11,7 @@ enum RemoteCard {
         var doc: [String: Any] = [
             "tone": "caution",
             "kicker": "1Password security approval",
-            "title": prompt.resolvedItem ?? prompt.description.subject ?? prompt.description.action,
+            "title": prompt.target.label,
             "subtitle": subtitle(prompt.requester),
             "sections": sections(prompt),
             "pickers": [[
@@ -47,18 +47,10 @@ enum RemoteCard {
         func text(_ label: String, _ text: String, mono: Bool) -> [String: Any] {
             mono ? ["kind": "text", "label": label, "text": text, "mono": true] : ["kind": "text", "label": label, "text": text]
         }
-        // The dialog shows a looked-up name with the opaque ID the command used beside it.
-        var request: [[String: Any]] = []
-        if prompt.resolvedItem != nil, let subject = prompt.description.subject { request.append(row("Item ID", subject, mono: true)) }
-        for detail in prompt.description.details {
-            if detail.label == "Vault", detail.style == .normal, let vault = prompt.resolvedVault {
-                request += [row("Vault", vault), row("Vault ID", detail.value, mono: true)]
-            } else {
-                request.append(row(detail.label, detail.value))
-            }
-        }
+        var request = [row("Request", prompt.item.action)] + prompt.item.details.map { row($0.label, $0.value) }
+        request += [row("Item ID", prompt.target.itemId, mono: true), row("Vault ID", prompt.target.vaultId, mono: true)]
         var sections: [[String: Any]] = []
-        if !request.isEmpty { sections.append(["kind": "fields", "label": "Request", "rows": request]) }
+        sections.append(["kind": "fields", "label": "Request", "rows": request])
         sections.append(text("Command", "op " + prompt.request.argv.map(shellQuote).joined(separator: " "), mono: true))
         var process: [[String: Any]]
         switch prompt.requester {

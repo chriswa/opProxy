@@ -20,6 +20,11 @@ Every read-only command is proxied, whether it comes from an agent or a terminal
 | Can return secret values | `read` (including `-o FILE`, written by the shim in the caller's directory), `item get` (including `--otp`), `document get` | Yes |
 | Metadata | `item list`, `document list`, `vault list`, `vault get`, `whoami`, `account list`, `account get` | No |
 
+Each command that can return secret values reads exactly one item, so opProxy works out which item before anything else:
+- **Only known shapes.** One item, named by its ID or title, plus allowlisted flags (`--vault`, `--fields`, `--reveal`, `--otp`, `--include-archive`, `-n`, `--format`, `--account` and a few display flags). Anything else, such as `--share-link` or a second item, goes to the real `op`.
+- **Resolved from the item list.** The daemon reads `op item list`, which returns no secrets, and finds the item by its ID, else its exact title, else its title in any case. A vault narrows the search, by ID or by name in any case. Substrings never match. No match, or several (the same title in two vaults), fails with a message that lists the candidates, and no dialog appears.
+- **Run by ID.** The command runs with the item and vault replaced by their IDs, so what runs is exactly the item that was checked and approved.
+
 The real `op` runs unchanged, so 1Password prompts exactly as it always has, for:
 - writes, `op run`, `op inject`, `item share`, `signin`, `plugin run`, and token creation
 - stdin input, `--config` or `--session`
@@ -34,7 +39,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 - `codex`, signed with team 2DC432GLL2
 - `cursor-agent`, a Node.js-signed `node` running Cursor's own `index.js`
 
-**Agents.** An approval covers one exact command (argv plus any allowed `OP_*` variables). The dialog asks two things:
+**Agents.** An approval covers one item: every field of it, through `read`, `item get` or `document get`. It's stored with the item's ID, its vault's ID and the account (`--account` or `OP_ACCOUNT`, if given). The dialog asks two things:
 - **Allow: Once · 1 Day · Forever.** Once is the default and remembers nothing.
 - **For: This agent · All agents.** Only applies to 1 Day and Forever. This agent means the session ID the agent claims, so a resumed session (`claude --resume <id>`) is covered too; an agent that names no session gets just its running process. All agents means every Claude Code, Codex and Cursor session, including ones started later.
 
@@ -42,10 +47,9 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 
 ### The approval dialog
 
-- **Always on top, one at a time.** The dialog takes focus and plays a rising, question-like chime when it appears. Any other requests wait in a queue, with a count shown; identical requests share one dialog.
-- **The item is the headline.** Opaque item and vault IDs are resolved to their names through the real `op`, ahead of the dialog.
-- **Who is asking, by name.** For a request from a Spaceterm surface, the dialog names the agent the way Spaceterm does, as in "Kevin (Claude Code) … in “fix flaky tests”". Spaceterm reuses names once a surface is archived, so the name appears only in live prompts (the dialog, the phone and the Touch ID reason) and is never saved with an approval; stored approvals keep only the surface's title.
-- **Context comes next:** the details, the exact `op` command, the agent's full shell command (recovered from the process tree), its most recent transcript message, then PIDs and the working directory.
+- **Always on top, one at a time.** The dialog takes focus and plays a rising, question-like chime when it appears. Any other requests wait in a queue, with a count shown; requests for the same item from the same agent or tab share one dialog.
+- **Who, then what, in the largest type.** First the agent's name, then the item as "Vault / Item". For a request from a Spaceterm surface the name is the one Spaceterm gave it ("Kevin"), with "Claude Code · in “fix flaky tests”" beneath; otherwise it's "Claude Code Agent" (or Codex, Cursor). Spaceterm reuses names once a surface is archived, so the name appears only in live prompts (the dialog, the phone and the Touch ID reason) and is never saved with an approval; stored approvals keep only the surface's title.
+- **Context comes next:** the fields asked for, the item and vault IDs, the `op` command as the agent wrote it, the agent's full shell command (recovered from the process tree), its most recent transcript message, then PIDs and the working directory.
 - **Only Touch ID approves.** The dialog embeds Apple's inline Touch ID glyph (`LAAuthenticationView`), so there's no separate system sheet.
 - **Deny, or wait for the countdown.** The Deny button shows the countdown; after 110 seconds the request is denied.
 - **Guarded input.** The keyboard does nothing except ⌘C, and clicks are ignored for 500ms after the dialog appears.
@@ -58,7 +62,7 @@ Every request that would show the dialog is also published on a feed socket, `~/
 - **The same chime.** A new request rings the phone with the dialog's chime while Spaceterm is open on it.
 - **Same options as the desktop.** The phone shows what the dialog shows (the item, the request, the `op` command, the agent's shell command and last message, PIDs and directory) and offers the same choices as one list: **Once**, then **1 Day** and **Forever**, each for this agent or all agents, for agents; **Once · This Terminal Tab** for terminals.
 - **The first answer wins.** The dialog and the phone ask at the same time. Answer on either and the other one goes away; a late answer from the other side is refused. A request leaves the phone when it's answered anywhere or times out, and its countdown on the phone starts when its dialog appears on the Mac.
-- **Phone approvals work like Touch ID ones.** A lasting agent approval from the phone is stored and lasts just as long. It can't be signed by the Mac's Secure Enclave key without your Touch ID, so it's stored with the phone's own signed reply instead. That reply commits to the exact entry (which agents, command, approval time and expiry), so it can't be edited, moved to another request, widened to all agents or extended.
+- **Phone approvals work like Touch ID ones.** A lasting agent approval from the phone is stored and lasts just as long. It can't be signed by the Mac's Secure Enclave key without your Touch ID, so it's stored with the phone's own signed reply instead. That reply commits to the exact entry (which agents, item, approval time and expiry), so it can't be edited, moved to another request, widened to all agents or extended.
 - **Pairing.** The phone asks to pair over the feed. The Mac shows the phone's name and key fingerprint; check the phone shows the same fingerprint, click **Pair…**, then touch Touch ID. The paired key is signed with the approval key, so nothing can pair a phone without your Touch ID.
 - **Unpairing.** `opProxy devices` lists paired phones with their fingerprints, and `opProxy unpair <key-id> | --all` (or the menu's **Paired Phones**) removes one. Unpairing a phone also ends every lasting approval made on it.
 
@@ -126,7 +130,7 @@ opProxy runs as your own user, with no root component. Every measure below assum
 
 **Can yield secrets without your Touch ID:**
 - **Keystrokes typed into an approved terminal tab.** A tab approval covers every read for 10 idle minutes, so anything that can type into that tab (for example Spaceterm's `ship-it`, or AppleScript with Automation permission) can run `op read … | curl …` there. This is by design and matches 1Password's own per-tab model.
-- **Reuse of approved commands.** A prompt-injected agent can re-run any command you approved for all agents, or for its own session, for the duration you chose. That's limited to those exact commands.
+- **Reuse of approved items.** A prompt-injected agent can read any field of an item you approved for all agents, or for its own session, for the duration you chose. That's limited to those items.
 - **Session IDs can be claimed.** This-agent approvals follow the session ID in the caller's environment, which opProxy can't verify. An agent that sets `CLAUDE_CODE_SESSION_ID` (or runs `exec env …`) to another session's ID reaches that session's approvals, so in practice a this-agent approval is open to any agent that knows the session ID. Session IDs appear in transcript file names under `~/.claude/projects`.
 - **Metadata is free.** Item titles, vaults, URLs and usernames come back from listings without any dialog.
 - **Changes from the menu.** Anything with Accessibility permission could click the menu to extend an existing approval or widen it to all agents, since those changes reuse your last Touch ID. It can't create new approvals.

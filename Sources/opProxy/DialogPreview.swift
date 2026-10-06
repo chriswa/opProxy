@@ -68,25 +68,33 @@ enum DialogPreview {
         let session = AgentSession(agent: .claude, sessionId: "c7d70e94-8847-4d74-b674-231862575006")
         let surface = SpacetermSurface(nodeId: "60af98d7-fdba-42a0-bb45-e02c94476075",
                                        title: "opProxy menu bar + hardening", agentName: "Kevin")
-        let samples: [(String, [String], String?, String?, String?)] = [
+        let linear = ItemIdentity(itemId: "h3j8k1m6n4p9r2s7t5v0w8x3yz", vaultId: "q4a7m2x9c1v6b3n8z5k0w2e7rt",
+                                  title: "Issue Tracker API key", vaultName: "Private")
+        let samples: [(String, [String], String?, String?, ItemIdentity)] = [
             ("item-get",
              ["item", "get", "Issue Tracker API key", "--fields", "label=credential", "--reveal"],
              #"TRACKER_KEY=$(op item get "Issue Tracker API key" --fields label=credential --reveal) && curl -s -X POST https://api.example.com/graphql -H "Authorization: $TRACKER_KEY" -H "Content-Type: application/json" -d '{"query":"{ issue(id: \"PROJ-521\") { title state { name } assignee { name } } }"}' | jq ."#,
              "I'll pull the ticket details from the issue tracker so I can check whether PROJ-521 is already assigned before starting on the config change.",
-             nil),
+             linear),
             ("read-by-id",
              ["read", "op://Private/a8d2f6g1h9j4k7l3m5n0p2q6rs/password"],
              #"export DEPLOY_KEY=$(op read 'op://Private/a8d2f6g1h9j4k7l3m5n0p2q6rs/password')"# + "\n" + #"curl -s https://api.example.com/v1/sessions -H "Authorization: Bearer $DEPLOY_KEY" | jq '.sessions[] | {session_id, status_enum, title}' | head -40"#,
              "The release build failed again. Next I'll list recent deploys to find the one that ran the migration, then read its log.\n\nIf that deploy is gone I'll fall back to the build logs API.",
-             "Deploy key"),
+             ItemIdentity(itemId: "a8d2f6g1h9j4k7l3m5n0p2q6rs", vaultId: "q4a7m2x9c1v6b3n8z5k0w2e7rt",
+                          title: "Deploy key", vaultName: "Private")),
             ("forever-all", ["read", "op://Private/Chat webhook/credential"],
              #"CHAT_TOKEN=$(op read "op://Private/Chat webhook/credential") ./post-summary.sh"#,
-             "Posting the summary to #team-updates.", nil),
-            ("minimal", ["document", "get", "prod-ssh-config", "--vault", "Engineering"], nil, nil, nil),
+             "Posting the summary to #team-updates.",
+             ItemIdentity(itemId: "b5c9d3e7f1g6h0i4j8k2l6m1np", vaultId: "q4a7m2x9c1v6b3n8z5k0w2e7rt",
+                          title: "Chat webhook", vaultName: "Private")),
+            ("minimal", ["document", "get", "prod-ssh-config", "--vault", "Engineering"], nil, nil,
+             ItemIdentity(itemId: "q2w3e4r5t6y7u8i9o0p1a2s3d4", vaultId: "pk3m7c2vq4xzt6nyb5rwd8hjfa",
+                          title: "prod-ssh-config", vaultName: "Engineering")),
             ("terminal", ["item", "get", "Issue Tracker API key", "--fields", "label=credential", "--reveal"],
-             nil, nil, nil),
+             nil, nil, linear),
         ]
-        for (name, argv, tool, message, resolved) in samples {
+        for (name, argv, tool, message, target) in samples {
+            guard case .success(let item) = ItemRequest.parse(argv) else { fatalError("unparseable sample \(argv)") }
             let request = ProxyRequest(session: session, spacetermNodeId: surface.nodeId, argv: argv, env: [:],
                                        cwd: "/Users/me/projects/app")
             let requester: Requester
@@ -100,14 +108,15 @@ enum DialogPreview {
                         "30112  -zsh"]),
                     surface: nil))
             } else {
-                key = .agent(ApprovalKey(audience: .session(agent: .claude, sessionId: session.sessionId), argv: argv, env: [:]))
-                requester = .agent(AgentRequester(session: session, surface: surface,
+                key = .agent(ApprovalKey(audience: .session(agent: .claude, sessionId: session.sessionId),
+                                         item: ItemRef(account: nil, vaultId: target.vaultId, itemId: target.itemId)))
+                // The minimal sample is an agent outside Spaceterm, which has no name.
+                requester = .agent(AgentRequester(session: session, surface: name == "minimal" ? nil : surface,
                                                   caller: CallerContext(toolCommand: tool, viaProcess: nil),
                                                   lastMessage: message, agentPid: 26441))
             }
-            let prompt = ApprovalPrompt(key: key, request: request, requester: requester,
-                                        description: OpCommand(argv: argv).description, resolvedItem: resolved,
-                                        resolvedVault: nil, peerPid: 48213)
+            let prompt = ApprovalPrompt(key: key, request: request, requester: requester, item: item, target: target,
+                                        peerPid: 48213)
             // The panel has one fixed look; render it under both system appearances to prove it.
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
                 let view = ApprovalView(prompt: prompt, actions: nil, authContext: nil)

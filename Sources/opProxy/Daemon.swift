@@ -21,7 +21,7 @@ enum ApprovalReach: CaseIterable {
 enum ApprovalScope: Equatable {
     /// Run this request only; remember nothing.
     case once
-    /// Agents: this exact command, for `ApprovalReach`, for `ApprovalLifetime`.
+    /// Agents: every read of this item, for `ApprovalReach`, for `ApprovalLifetime`.
     case lasting(ApprovalLifetime, ApprovalReach)
     /// Terminals: every read from the tab, 1Password-style (idle timeout, 12-hour cap).
     case tab
@@ -72,13 +72,13 @@ enum ApprovalOptions {
     private static func hint(_ lifetime: ApprovalLifetime, _ reach: ApprovalReach, agent: AgentKind) -> String {
         switch (lifetime, reach) {
         case (.day, .thisAgent):
-            return "Approves this exact command in this \(agent.displayName) session for 1 day, including if the session is resumed."
+            return "Approves every field of this item for this \(agent.displayName) session for 1 day, including if the session is resumed."
         case (.day, .allAgents):
-            return "Approves this exact command for every Claude Code, Codex and Cursor session for 1 day."
+            return "Approves every field of this item for every Claude Code, Codex and Cursor session for 1 day."
         case (.forever, .thisAgent):
-            return "Approves this exact command in this \(agent.displayName) session until you revoke it, including if the session is resumed."
+            return "Approves every field of this item for this \(agent.displayName) session until you revoke it, including if the session is resumed."
         case (.forever, .allAgents):
-            return "Approves this exact command for every agent session until you revoke it."
+            return "Approves every field of this item for every agent session until you revoke it."
         }
     }
 }
@@ -116,7 +116,7 @@ enum Decision {
     }
 }
 
-/// Identifies one dialog: identical requests share it.
+/// Identifies one dialog: requests for the same item from the same requester share it.
 enum DialogKey: Hashable {
     case agent(ApprovalKey)
     case terminal(TerminalKey)
@@ -127,14 +127,26 @@ enum Requester {
     case agent(AgentRequester)
     case terminal(TerminalRequester)
 
+    /// "Claude Code", or the terminal app.
+    var kind: String {
+        switch self {
+        case .agent(let a): return a.session.agent.displayName
+        case .terminal(let t): return t.info.app == "unknown process" ? "A process" : t.info.app
+        }
+    }
+
     /// "Kevin (Claude Code)" when Spaceterm has named the agent, else "Claude Code".
     var name: String {
-        let kind: String
+        surface?.agentName.map { "\($0) (\(kind))" } ?? kind
+    }
+
+    /// The dialog's first headline: "Kevin" when Spaceterm has named the agent, else
+    /// "Claude Code Agent"; for a terminal, its app.
+    var headline: String {
         switch self {
-        case .agent(let a): kind = a.session.agent.displayName
-        case .terminal(let t): kind = t.info.app == "unknown process" ? "A process" : t.info.app
+        case .agent: return surface?.agentName ?? "\(kind) Agent"
+        case .terminal: return surface?.agentName ?? kind
         }
-        return surface?.agentName.map { "\($0) (\(kind))" } ?? kind
     }
 
     /// The Spaceterm surface the caller is in, if any.
@@ -174,10 +186,9 @@ struct ApprovalPrompt {
     let key: DialogKey
     let request: ProxyRequest
     let requester: Requester
-    let description: OpCommand.Description
-    /// Names looked up when the request uses opaque IDs.
-    let resolvedItem: String?
-    let resolvedVault: String?
+    let item: ItemRequest
+    /// The item `item` was resolved to: what approving grants.
+    let target: ItemIdentity
     /// The process that asked (usually the shim).
     let peerPid: pid_t
 
@@ -185,7 +196,7 @@ struct ApprovalPrompt {
     /// line a phone shows beside its slide control.
     var touchIDReason: String {
         let who = requester.surfaceTitle.map { "\(requester.name) in “\($0)”" } ?? requester.name
-        return "let \(who) \(description.summary)"
+        return "let \(who) \(item.summary(target))"
     }
 }
 
@@ -254,11 +265,12 @@ final class Daemon {
             case terminal(TerminalKey)
         }
         let target: Target
-        /// Item name, or the terminal tab for tab-wide approvals.
+        /// "Vault / Item", or the terminal tab for tab-wide approvals.
         let title: String
         /// Who: "Claude Code “title”", "iTerm · ttys012".
         let requester: String
-        let command: String?
+        /// The item's IDs, for agent approvals.
+        let ids: String?
         let approvedAt: Date
         /// nil for terminal tabs, which lapse after idling.
         let expiresAt: Date?
@@ -280,14 +292,13 @@ final class Daemon {
     func recentApprovals(limit: Int) -> [RecentApproval] {
         stateQueue.sync {
             let agents = store.active.map { a in
-                RecentApproval(target: .agent(a.key),
-                               title: a.itemLabel ?? OpCommand(argv: a.key.argv).description.subject ?? "op " + (a.key.argv.first ?? ""),
-                               requester: Self.describe(a), command: "op " + a.key.argv.joined(separator: " "),
+                RecentApproval(target: .agent(a.key), title: a.label, requester: Self.describe(a),
+                               ids: "item \(a.key.item.itemId) · vault \(a.key.item.vaultId)",
                                approvedAt: a.approvedAt, expiresAt: a.expiresAt, grantedTo: a.grantedTo)
             }
             let tabs = terminals.active.map { t in
                 RecentApproval(target: .terminal(t.key), title: "All reads from this terminal tab", requester: t.label,
-                               command: nil, approvedAt: t.approvedAt, expiresAt: nil, grantedTo: nil)
+                               ids: nil, approvedAt: t.approvedAt, expiresAt: nil, grantedTo: nil)
             }
             return Array((agents + tabs).sorted { $0.approvedAt > $1.approvedAt }.prefix(limit))
         }
@@ -343,7 +354,7 @@ final class Daemon {
                     return .failed("that approval has already expired or been revoked")
                 }
                 log.write("amended: \(key.audience.logName) → \((audience ?? key.audience).logName)"
-                          + "\(expiresAt.map { " until \($0)" } ?? "") op \(key.argv.joined(separator: " "))")
+                          + "\(expiresAt.map { " until \($0)" } ?? "") item \(key.item.itemId)")
                 return .changed
             } catch {
                 self.signingContext = nil
@@ -370,6 +381,34 @@ final class Daemon {
         if let reply { _ = UnixSocket.writeAll(fd, reply) }
     }
 
+    /// Who is asking, as far as the process tree shows.
+    private enum Caller {
+        case agent(SessionIdentity, AgentSession, ApprovalAudience)
+        case terminal(TerminalKey)
+
+        var logName: String {
+            switch self {
+            case .agent(_, let session, _): return "\(session.agent.rawValue):\(session.sessionId.prefix(8))"
+            case .terminal(let t): return "terminal:\(t.sid)"
+            }
+        }
+    }
+
+    /// Env vars are forgeable; the process tree decides whether an agent is asking. A genuine
+    /// agent anywhere above the caller means agent rules, whatever the env says.
+    private func identify(_ request: ProxyRequest, peer: pid_t) -> Caller? {
+        if let identity = SessionIdentity.verify(peer: peer) {
+            let claimed = request.session.flatMap { $0.agent == identity.agent ? $0 : nil }
+            let session = claimed ?? AgentSession(agent: identity.agent, sessionId: "unknown")
+            // An agent that names no session gets its process as the audience, so nameless
+            // agents never share approvals with each other.
+            let audience: ApprovalAudience = claimed.map { .session(agent: $0.agent, sessionId: $0.sessionId) }
+                ?? .process(agent: identity.agent, instance: identity.agentInstance)
+            return .agent(identity, session, audience)
+        }
+        return TerminalKey.of(pid: peer).map(Caller.terminal)
+    }
+
     private func handle(_ request: ProxyRequest, peer: pid_t?, fd: Int32) -> ProxyResponse {
         let command = "op " + request.argv.joined(separator: " ")
         // Anything can write to the socket, so routing comes from argv here, not the client.
@@ -377,38 +416,46 @@ final class Daemon {
             log.write("rejected: \(command)")
             return .failure("opProxy only proxies read-only commands; `\(command)` must run directly.")
         }
-        // Env vars are forgeable; the process tree decides whether an agent is asking. A
-        // genuine agent anywhere above the caller means agent rules, whatever the env says.
-        let key: DialogKey
-        let tag: String
-        if let identity = SessionIdentity.verify(peer: peer) {
-            let claimed = request.session.flatMap { $0.agent == identity.agent ? $0 : nil }
-            let session = claimed ?? AgentSession(agent: identity.agent, sessionId: "unknown")
-            tag = "\(session.agent.rawValue):\(session.sessionId.prefix(8)) \(command)"
-            // An agent that names no session gets its process as the audience, so nameless
-            // agents never share approvals with each other.
-            let audience: ApprovalAudience = claimed.map { .session(agent: $0.agent, sessionId: $0.sessionId) }
-                ?? .process(agent: identity.agent, instance: identity.agentInstance)
-            let approvalKey = ApprovalKey(audience: audience, argv: request.argv, env: request.env)
-            key = .agent(approvalKey)
-            if !plan.requiresApproval || stateQueue.sync(execute: { store.isApproved(approvalKey) }) {
-                log.write("allowed: \(tag)")
-                return auth.run(plan.daemonArgv, extraEnv: request.env)
-            }
-            let prompt = { self.agentPrompt(request, session: session, key: key, peer: peer, identity: identity) }
-            if let refusal = decide(prompt, key: key, tag: tag, fd: fd) { return refusal }
-        } else {
-            guard let terminal = TerminalKey.of(pid: peer) else { return .usePassthrough }
-            tag = "terminal:\(terminal.sid) \(command)"
-            key = .terminal(terminal)
-            if !plan.requiresApproval || stateQueue.sync(execute: { terminals.use(terminal) }) {
-                log.write("allowed: \(tag)")
-                return auth.run(plan.daemonArgv, extraEnv: request.env)
-            }
-            let prompt = { self.terminalPrompt(request, key: key, peer: peer, sid: terminal.sid) }
-            if let refusal = decide(prompt, key: key, tag: tag, fd: fd) { return refusal }
+        guard let caller = identify(request, peer: peer) else { return .usePassthrough }
+        var tag = "\(caller.logName) \(command)"
+        guard let item = plan.item else {
+            log.write("allowed: \(tag)")
+            return auth.run(plan.daemonArgv, extraEnv: request.env)
         }
-        return auth.run(plan.daemonArgv, extraEnv: request.env)
+        // Work out which item this is before anything else, so the approval check, the dialog
+        // and the command that runs all refer to the same item, by ID.
+        let target: ItemIdentity
+        switch resolve(item, env: request.env) {
+        case .success(let found): target = found
+        case .failure(let refusal):
+            log.write("unresolved: \(tag)")
+            return refusal.response
+        }
+        tag += " → \(target.label)"
+        let argv = item.pinned(to: target)
+        let key: DialogKey
+        switch caller {
+        case .agent(_, _, let audience):
+            let account = item.account ?? request.env["OP_ACCOUNT"].flatMap { $0.isEmpty ? nil : $0 }
+            key = .agent(ApprovalKey(audience: audience,
+                                     item: ItemRef(account: account, vaultId: target.vaultId, itemId: target.itemId)))
+        case .terminal(let terminal):
+            key = .terminal(terminal)
+        }
+        if stateQueue.sync(execute: { isApproved(key) }) {
+            log.write("allowed: \(tag)")
+            return auth.run(argv, extraEnv: request.env)
+        }
+        let prompt: () -> ApprovalPrompt
+        switch caller {
+        case .agent(let identity, let session, _):
+            prompt = { self.agentPrompt(request, item: item, target: target, session: session, key: key, peer: peer,
+                                        identity: identity) }
+        case .terminal(let terminal):
+            prompt = { self.terminalPrompt(request, item: item, target: target, key: key, peer: peer, sid: terminal.sid) }
+        }
+        if let refusal = decide(prompt, key: key, tag: tag, fd: fd) { return refusal }
+        return auth.run(argv, extraEnv: request.env)
     }
 
     /// Shows (or joins) the dialog for `key`; nil means approved.
@@ -418,7 +465,7 @@ final class Daemon {
         switch decision {
         case .approved: return nil
         case .denied:
-            return .failure("the user denied this 1Password request. Ask them before retrying `op \(tag.split(separator: " ", maxSplits: 2).last ?? "")`.")
+            return .failure("the user denied this 1Password request. Ask them before retrying.")
         case .timedOut:
             return .failure("the approval dialog timed out without an answer. Ask the user before retrying.")
         }
@@ -444,20 +491,20 @@ final class Daemon {
             }
         case (.agent(let k), .lasting(let lifetime, _)):
             let stored = scope.storedKey(for: k)!
-            let itemLabel = prompt.resolvedItem ?? prompt.description.subject
+            let (itemLabel, vaultLabel) = (prompt.target.title, prompt.target.vaultName)
             let grantedTo = stored.audience == .allAgents ? k.audience : nil
             do {
                 switch authority {
                 case .touchID(let context):
                     if let context { signingContext = context }
                     try store.approve(stored, lifetime: lifetime, sessionLabel: prompt.requester.surfaceTitle,
-                                      grantedTo: grantedTo, itemLabel: itemLabel) { payload in
+                                      grantedTo: grantedTo, itemLabel: itemLabel, vaultLabel: vaultLabel) { payload in
                         guard let signer else { throw NoApprovalKey() }
                         return try signer.sign(payload, context: context)
                     }
                 case .device(let proof, let grant?):
                     try store.approve(stored, sessionLabel: prompt.requester.surfaceTitle, grantedTo: grantedTo, itemLabel: itemLabel,
-                                      approvedAt: grant.approvedAt, expiresAt: grant.expiresAt, proof: proof)
+                                      vaultLabel: vaultLabel, approvedAt: grant.approvedAt, expiresAt: grant.expiresAt, proof: proof)
                 case .device(_, nil):
                     log.write("approved once, not remembered: the phone's reply carried no grant")
                 }
@@ -482,7 +529,7 @@ final class Daemon {
                 return
             }
             pending[key] = [waiter]
-            log.write("prompting: \(Self.describe(key)) op \(prompt.request.argv.joined(separator: " "))")
+            log.write("prompting: \(Self.describe(key)) op \(prompt.request.argv.joined(separator: " ")) → \(prompt.target.label)")
             approver.requestApproval(prompt) { [self] decision in
                 stateQueue.async { [self] in
                     record(decision, for: prompt)
@@ -540,86 +587,76 @@ final class Daemon {
         }
     }
 
-    private func agentPrompt(_ request: ProxyRequest, session: AgentSession, key: DialogKey, peer: pid_t,
-                             identity: SessionIdentity) -> ApprovalPrompt {
-        let command = OpCommand(argv: request.argv)
+    private func agentPrompt(_ request: ProxyRequest, item: ItemRequest, target: ItemIdentity, session: AgentSession,
+                             key: DialogKey, peer: pid_t, identity: SessionIdentity) -> ApprovalPrompt {
         let caller = CallerContext.from(chain: ProcessTree.ancestry(of: peer), agentPid: identity.agentPid)
         let requester = AgentRequester(session: session, surface: spacetermSurface(request),
                                        caller: caller, lastMessage: SessionInfo.lastAgentMessage(session),
                                        agentPid: identity.agentPid)
-        let names = resolveNames(command, env: request.env, mayPrompt: true)
-        return ApprovalPrompt(key: key, request: request, requester: .agent(requester), description: command.description,
-                              resolvedItem: names?.item, resolvedVault: names?.vault, peerPid: peer)
+        return ApprovalPrompt(key: key, request: request, requester: .agent(requester), item: item, target: target,
+                              peerPid: peer)
     }
 
-    private func terminalPrompt(_ request: ProxyRequest, key: DialogKey, peer: pid_t, sid: pid_t) -> ApprovalPrompt {
-        let command = OpCommand(argv: request.argv)
+    private func terminalPrompt(_ request: ProxyRequest, item: ItemRequest, target: ItemIdentity, key: DialogKey,
+                                peer: pid_t, sid: pid_t) -> ApprovalPrompt {
         let info = TerminalInfo.from(chain: ProcessTree.ancestry(of: peer), sid: sid)
         let requester = TerminalRequester(info: info, surface: spacetermSurface(request))
-        let names = resolveNames(command, env: request.env, mayPrompt: true)
-        return ApprovalPrompt(key: key, request: request, requester: .terminal(requester), description: command.description,
-                              resolvedItem: names?.item, resolvedVault: names?.vault, peerPid: peer)
+        return ApprovalPrompt(key: key, request: request, requester: .terminal(requester), item: item, target: target,
+                              peerPid: peer)
     }
 
     private func spacetermSurface(_ request: ProxyRequest) -> SpacetermSurface? {
         request.spacetermNodeId.map { SpacetermSurface.lookup(nodeId: $0, environment: ProcessInfo.processInfo.environment) }
     }
 
-    struct ResolvedNames {
-        /// Set when the request named the item by ID.
-        let item: String?
-        /// Set when the request named the vault by ID.
-        let vault: String?
+    // MARK: Which item a request means
+
+    struct Unresolved: Error {
+        let response: ProxyResponse
     }
 
-    private let namesLock = NSLock()
-    private var nameCache: [String: (title: String, vault: String?)] = [:]
+    private let catalogLock = NSLock()
+    private var catalogs: [[String]: (catalog: ItemCatalog, fetchedAt: Date)] = [:]
+    /// Agents tend to ask for several things in a burst; a listing this fresh is reused.
+    private static let catalogTTL: TimeInterval = 30
 
-    /// Looks up names for opaque item and vault IDs by asking the real `op`, so the dialog and
-    /// menu never show a bare ID. With `mayPrompt`, an unauthorized daemon asks 1Password
-    /// first; the request needs that authorization anyway, so it only moves the prompt earlier.
-    private func resolveNames(_ command: OpCommand, env: [String: String], mayPrompt: Bool) -> ResolvedNames? {
-        var item: String?
-        var vault: String?
-        switch command.subcommand.joined(separator: " ") {
-        case "read":
-            let ref = command.positionals.first.flatMap(SecretReference.init)
-            (item, vault) = (ref?.item, ref?.vault)
-        case "item get", "document get":
-            (item, vault) = (command.positionals.first, command.flags["--vault"])
-        default:
-            return nil
+    /// The one item `item` names, worked out from `op item list` (which returns no secrets)
+    /// by `ItemCatalog`'s rules. A miss in a cached listing is retried against a fresh one.
+    private func resolve(_ item: ItemRequest, env: [String: String]) -> Result<ItemIdentity, Unresolved> {
+        let listArgv = ["item", "list", "--format", "json"] + (item.includeArchive ? ["--include-archive"] : [])
+            + (item.account.map { ["--account", $0] } ?? [])
+        let cacheKey = listArgv + [env["OP_ACCOUNT"] ?? "", env["OP_INCLUDE_ARCHIVE"] ?? ""]
+        var match = ItemCatalog.Match.none
+        for fresh in [false, true] {
+            let cached = fresh ? nil : catalogLock.withLock { catalogs[cacheKey] }
+                .flatMap { Date().timeIntervalSince($0.fetchedAt) < Self.catalogTTL ? $0.catalog : nil }
+            let catalog: ItemCatalog
+            if let cached {
+                catalog = cached
+            } else {
+                let listing = auth.run(listArgv, extraEnv: env, timeout: 90)
+                guard listing.exitCode == 0 else { return .failure(Unresolved(response: listing)) }
+                guard let parsed = try? ItemCatalog(json: listing.stdout) else {
+                    return .failure(Unresolved(response: .failure("could not read `op item list` to find “\(item.item)”.")))
+                }
+                catalog = parsed
+                catalogLock.withLock { catalogs[cacheKey] = (parsed, Date()) }
+            }
+            match = catalog.resolve(item: item.item, vault: item.vault)
+            if match != .none || cached == nil { break }
         }
-        guard let item, OpCommand.looksLikeID(item) || vault.map(OpCommand.looksLikeID) == true else { return nil }
-        let account = command.flags["--account"].map { ["--account", $0] } ?? []
-        let cacheKey = ([item, vault ?? ""] + account).joined(separator: "\u{1f}")
-        if let hit = namesLock.withLock({ nameCache[cacheKey] }) {
-            return names(hit, item: item, vault: vault)
-        }
-        if !mayPrompt, auth.run(["whoami"] + account, extraEnv: env, timeout: 5).exitCode != 0 { return nil }
-        let lookup = auth.run(["item", "get", item, "--format", "json"] + (vault.map { ["--vault", $0] } ?? []) + account,
-                              extraEnv: env, timeout: 90)
-        guard lookup.exitCode == 0,
-              let obj = try? JSONSerialization.jsonObject(with: lookup.stdout) as? [String: Any],
-              let title = obj["title"] as? String else { return nil }
-        let found = (title: title, vault: (obj["vault"] as? [String: Any])?["name"] as? String)
-        namesLock.withLock { nameCache[cacheKey] = found }
-        return names(found, item: item, vault: vault)
-    }
-
-    private func names(_ found: (title: String, vault: String?), item: String, vault: String?) -> ResolvedNames {
-        ResolvedNames(item: OpCommand.looksLikeID(item) ? found.title : nil,
-                      vault: vault.map(OpCommand.looksLikeID) == true ? found.vault : nil)
-    }
-
-    /// Replaces approval labels that are bare IDs (approved before a name could be looked up)
-    /// with the item's name. Never prompts; runs only while the daemon is authorized.
-    func repairItemLabels() {
-        let bare = stateQueue.sync { store.active.filter { $0.itemLabel.map(OpCommand.looksLikeID) ?? true } }
-        for approval in bare {
-            guard let names = resolveNames(OpCommand(argv: approval.key.argv), env: approval.key.env, mayPrompt: false),
-                  let title = names.item else { continue }
-            stateQueue.sync { try? store.setItemLabel(approval.key, to: title) }
+        let place = item.vault.map { " in vault “\($0)”" } ?? ""
+        switch match {
+        case .one(let found):
+            return .success(found)
+        case .none:
+            return .failure(Unresolved(response: .failure(
+                "no item matches “\(item.item)”\(place). opProxy finds an item by its ID or its exact title (in any case); "
+                + "`op item list --format json` lists both.")))
+        case .many(let found):
+            let list = found.map { "\($0.itemId) (“\($0.title)” in \($0.vaultName))" }.joined(separator: ", ")
+            return .failure(Unresolved(response: .failure(
+                "“\(item.item)”\(place) matches \(found.count) items: \(list). Use the item's ID, or its vault, to pick one.")))
         }
     }
 }

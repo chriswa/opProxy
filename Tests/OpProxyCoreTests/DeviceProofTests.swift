@@ -6,7 +6,7 @@ final class DeviceProofTests: XCTestCase {
     var dir: URL!
     var devices: PairedDeviceStore!
     let phone = P256.Signing.PrivateKey()
-    let key = ApprovalKey(audience: .session(agent: .claude, sessionId: "s"), argv: ["read", "op://a/b/c"], env: [:])
+    let key = ApprovalKey(audience: .session(agent: .claude, sessionId: "s"), item: ItemRef(account: nil, vaultId: "v", itemId: "i"))
     let approvedAt = Date(timeIntervalSince1970: 1_000_000)
     var day: Date { ApprovalLifetime.day.expiry(from: approvedAt) }
 
@@ -52,7 +52,7 @@ final class DeviceProofTests: XCTestCase {
     }
 
     func approve(storing stored: ApprovalKey? = nil, expiresAt: Date? = nil, _ proof: DeviceProof) throws -> Bool {
-        try store().approve(stored ?? key, sessionLabel: nil, itemLabel: nil, approvedAt: approvedAt, expiresAt: expiresAt ?? day,
+        try store().approve(stored ?? key, sessionLabel: nil, itemLabel: nil, vaultLabel: nil, approvedAt: approvedAt, expiresAt: expiresAt ?? day,
                             proof: proof)
         return store().isApproved(key)
     }

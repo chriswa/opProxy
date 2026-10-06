@@ -55,8 +55,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         render()
         rebuildApprovals(in: menu)
         rebuildPhones()
-        // Names for approvals stored under a bare ID; shows up the next time the menu opens.
-        DispatchQueue.global().async { [daemon] in daemon.repairItemLabels() }
     }
 
     // MARK: Recent approvals
@@ -85,7 +83,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             let submenu = NSMenu()
             submenu.autoenablesItems = false
             var info = [approval.requester]
-            if let command = approval.command { info.append(String(command.prefix(90))) }
+            if let ids = approval.ids { info.append(ids) }
             let expiry: String
             switch approval.expiresAt {
             case .some(let date) where date >= ApprovalStore.forever: expiry = "never expires"

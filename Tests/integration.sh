@@ -42,13 +42,29 @@ case "\$*" in
   "account list --format json") echo '[{"user_uuid": "STUBUSER", "url": "stub.1password.com"}]'; exit 0 ;;
   "vault list --format json") [ -e "$WORK/refuse-auth" ] && { echo "authorization dismissed" >&2; exit 1; } ;;
   *sid*) python3 -c 'import os; print(os.getsid(0))'; exit 0 ;;
-  "item get abcdefghijklmnopqrstuvwxyz --format json --vault zyxwvutsrqponmlkjihgfedcba")
-    echo '{"title": "Stub Item Title", "vault": {"name": "Stub Vault"}}'; exit 0 ;;
+  "item list --format json"*) touch "\$AUTH"; cat "$WORK/catalog.json"; exit 0 ;;
 esac
 touch "\$AUTH"
 echo "stub gp=\$(ps -o ppid= -p \$PPID | tr -d ' ') args=\$* account=\${OP_ACCOUNT:-}"
 STUB
 chmod +x "$OPPROXY_REAL_OP"
+
+# The stub's items. Most use their names as IDs, so a request pinned to IDs runs the same
+# argv the caller sent.
+python3 - "$WORK/catalog.json" <<'PY'
+import json, sys
+plain = ["a/b", "t/one", "t/two", "t/three", "strip/x", "Shared/api", "ctx/item", "p/q", "gone/x", "idle/x",
+         "once/x", "day/x", "all/x", "phone/item", "d/e", "fail/x", "raw/item", "sid/x", "x/y", "forged/item",
+         "signed/x", "n/a"]
+items = [{"id": i, "title": i, "vault": {"id": v, "name": v}} for v, i in (p.split("/") for p in plain)]
+stub_vault = {"id": "zyxwvutsrqponmlkjihgfedcba", "name": "Stub Vault"}
+items += [
+    {"id": "abcdefghijklmnopqrstuvwxyz", "title": "Stub Item Title", "vault": stub_vault},
+    {"id": "shared1shared1shared1share", "title": "Shared Name", "vault": stub_vault},
+    {"id": "shared2shared2shared2share", "title": "Shared Name", "vault": {"id": "other", "name": "Other"}},
+]
+json.dump(items, open(sys.argv[1], "w"))
+PY
 
 PASS=0; FAIL=0
 check() { # name, condition...
@@ -130,11 +146,12 @@ check "repeat: still returns output" via_daemon "$out"
 
 SID=sess-B agent "$OP" read op://a/b/c >/dev/null
 check "other session: prompts again" [ "$(count 'prompting: claude:sess-B')" = 1 ]
-agent "$OP" read op://a/b/c -n >/dev/null
-check "different argv: prompts again" [ "$(count 'prompting: claude:sess-A op read op://a/b/c -n')" = 1 ]
+agent "$OP" read op://a/b/other -n >/dev/null
+agent "$OP" item get b --vault A --fields label=x >/dev/null
+check "same item, other fields: no prompt" [ "$(count 'prompting: claude:sess-A')" = 1 ]
 out=$(agent env OP_ACCOUNT=acme "$OP" read op://a/b/c)
 check "OP_ACCOUNT forwarded" [ "$out" = "stub gp=$DAEMON_PID args=read op://a/b/c account=acme" ]
-check "OP_ACCOUNT is part of the key" [ "$(count 'prompting: claude:sess-A op read op://a/b/c$')" = 2 ]
+check "OP_ACCOUNT is part of the key" [ "$(count 'prompting: claude:sess-A op read op://a/b/c → a / b')" = 2 ]
 
 out=$(agent "$OP" whoami)
 check "whoami: proxied without a prompt" [ "$out" = "stub whoami" ] 
@@ -157,9 +174,10 @@ cd - >/dev/null
 
 # --- tool command recovered from the process tree
 agent /bin/zsh -c "X=\$($OP read op://ctx/item/field) && echo done" >/dev/null
-check "dialog shows the agent's shell command" grep -qF '"toolCommand":"X=$('"${OP//\//\\/}"' read op:\/\/ctx\/item\/field) && echo done","via":null' "$LOG"
-check "dialog headlines the item" grep -q '"subject":"item"' "$LOG"
-check "dialog shows vault/field" grep -q '"details":\["Vault=ctx","Field=field"\]' "$LOG"
+check "dialog shows the agent's shell command" grep -qF '"toolCommand":"X=$('"${OP//\//\\/}"' read op:\/\/ctx\/item\/field) && echo done","vault":"ctx","via":null' "$LOG"
+check "dialog headlines the item" grep -q '"item":"item".*"vault":"ctx"' "$LOG"
+check "dialog shows the field" grep -q '"details":\["Field=field"\]' "$LOG"
+check "dialog headlines an unnamed agent generically" grep -q '"headline":"Claude Code Agent"' "$LOG"
 
 # --- concurrent identical requests share one dialog
 start_daemon approved 1
@@ -209,11 +227,13 @@ SID=sess-J agent "$OP" read op://all/x/y >/dev/null
 SID=sess-K agent "$OP" read op://all/x/y >/dev/null
 agent env -u CLAUDE_CODE_SESSION_ID -u CLAUDE_SESSION_ID "$OP" read op://all/x/y >/dev/null
 check "all agents: other sessions run silently" [ "$(count 'prompting: .* op read op://all/x/y')" = 1 ]
-SID=sess-K agent "$OP" read op://all/x/y -n >/dev/null
-check "all agents: only that exact command" [ "$(count 'prompting: claude:sess-K op read op://all/x/y -n')" = 1 ]
+SID=sess-K agent "$OP" read op://all/x/other -n >/dev/null
+check "all agents: every field of that item" [ "$(count 'prompting: claude:sess-K')" = 0 ]
+SID=sess-K agent "$OP" read op://day/x/y >/dev/null
+check "all agents: only that item" [ "$(count 'prompting: claude:sess-K op read op://day/x/y')" = 1 ]
 check "all agents: stored forever for every agent" python3 -c "
 import json, sys
-[a] = [a for a in json.load(open(sys.argv[1])) if a['key']['argv'] == ['read', 'op://all/x/y']]
+[a] = [a for a in json.load(open(sys.argv[1])) if a['key']['item'] == {'vaultId': 'all', 'itemId': 'x'}]
 assert a['key']['audience'] == {'allAgents': {}} and a['expiresAt'].startswith('2100'), a
 assert a['grantedTo'] == {'session': {'agent': 'claude', 'sessionId': 'sess-J'}}, a" "$OPPROXY_HOME/approvals.json"
 check "all agents: listed" grep -q "^All agents" <<<"$("$BIN" list)"
@@ -233,10 +253,10 @@ check "phone once: reply accepted" [ "$res" = '{"id":"'"$(python3 -c 'import jso
 check "phone once: request ran" via_daemon "$(cat "$WORK/asked")"
 check "phone once: nothing stored" not_in "sess-P" "$OPPROXY_HOME/approvals.json"
 check "phone once: logged" grep -q "phone approve once: Test Phone" "$LOG"
-check "phone: document headlines the item" grep -q '"title":"item"' "$WORK/phone-doc.json"
+check "phone: document headlines the item" grep -q '"title":"phone / item"' "$WORK/phone-doc.json"
 check "phone: document offers the dialog's options" grep -q '"default":"once","id":"duration","label":"Allow","options":\[{"hint":"Runs this one request' "$WORK/phone-doc.json"
 check "phone: document offers all agents" grep -q '"id":"forever-all","label":"Forever · All agents"' "$WORK/phone-doc.json"
-check "phone: document confirms what approving grants" grep -q '"confirm":"Let Claude Code .*read phone/item/field"' "$WORK/phone-doc.json"
+check "phone: document confirms what approving grants" grep -q '"confirm":"Let Claude Code .*read field from “phone / item”"' "$WORK/phone-doc.json"
 
 ask sess-Q approve 1d
 check "phone 1d: request ran" via_daemon "$(cat "$WORK/asked")"
@@ -284,7 +304,7 @@ start_daemon approved 1
 
 # --- approvals persist across daemon restarts
 out=$(agent "$OP" read op://a/b/c)
-check "restart: approval persisted" [ "$(count 'prompting: claude:sess-A op read op://a/b/c$')" = 2 ]
+check "restart: approval persisted" [ "$(count 'prompting: claude:sess-A op read op://a/b/c → a / b')" = 2 ]
 
 # --- denial: error, nothing stored, next call prompts again
 start_daemon denied
@@ -336,11 +356,21 @@ rm -f "$WORK/authorized"; sleep 2.5
 check "poll: notices expiry" grep -q "1Password: not authorized" <<<"$(status)"
 check "poll: logs expiry" grep -q "1Password authorization ended" "$LOG"
 
-# --- opaque IDs are looked up so the dialog shows names
+# --- every request is resolved to one item, by ID, before approval, and runs pinned to it
 SID=sess-N agent "$OP" read op://zyxwvutsrqponmlkjihgfedcba/abcdefghijklmnopqrstuvwxyz/password >/dev/null
-check "IDs: dialog shows the item's name" grep -q '"resolvedItem":"Stub Item Title"' "$LOG"
-check "IDs: dialog shows the vault's name" grep -q '"resolvedVault":"Stub Vault"' "$LOG"
+check "IDs: dialog shows the item's name" grep -q '"item":"Stub Item Title"' "$LOG"
+check "IDs: dialog shows the vault's name" grep -q '"vault":"Stub Vault"' "$LOG"
 check "IDs: approval labelled by name" grep -q '"itemLabel" : "Stub Item Title"' "$OPPROXY_HOME/approvals.json"
+out=$(SID=sess-N agent "$OP" item get "stub item title" --vault "stub vault" --fields label=username)
+check "names: the same item by name needs no prompt" [ "$(count 'prompting: claude:sess-N')" = 1 ]
+check "names: runs pinned to IDs" [ "$out" = "stub gp=$DAEMON_PID args=item get abcdefghijklmnopqrstuvwxyz --vault zyxwvutsrqponmlkjihgfedcba --fields label=username account=" ]
+err=$(SID=sess-N agent "$OP" item get "Shared Name" 2>&1); rc=$?
+check "ambiguous: refused" [ $rc = 1 ]
+check "ambiguous: lists the candidates" grep -q "matches 2 items: shared1shared1shared1share (“Shared Name” in Stub Vault), shared2" <<<"$err"
+err=$(SID=sess-N agent "$OP" item get "Stub Item" 2>&1); rc=$?
+check "substring: no match" grep -q "no item matches “Stub Item”" <<<"$err"
+check "unresolved: never prompts" [ "$(count 'prompting: claude:sess-N')" = 1 ]
+check "unlisted flag: passes through" not_daemon "$(SID=sess-N agent "$OP" item get "Stub Item Title" --share-link)"
 
 # --- "this agent" approvals follow the claimed session ID, so a command that claims another
 # session's ID reaches its approvals (README: known weaknesses)
@@ -354,7 +384,7 @@ import json, sys
 entries = json.load(open(sys.argv[1]))
 forged = json.loads(json.dumps(entries[0]))
 forged["key"]["audience"] = {"session": {"agent": "claude", "sessionId": "sess-E"}}
-forged["key"]["argv"] = ["read", "op://forged/item/field"]
+forged["key"]["item"] = {"vaultId": "forged", "itemId": "item"}
 json.dump(entries + [forged], open(sys.argv[1], "w"))
 PY
 check "forged approval: listed as invalid" grep -q "Ignoring 1 entry with invalid signatures" <<<"$("$BIN" list)"
@@ -375,11 +405,11 @@ start_daemon approved
 SAVED_OP=$OPPROXY_REAL_OP
 export OPPROXY_REAL_OP=/bin/echo
 OP_REQUIREMENT="anchor apple" start_daemon approved
-out=$(agent "$OP" read op://signed/x/y 2>&1)
-check "signed op: runs after the loaded-code check" [ "$out" = "read op://signed/x/y" ]
+out=$(agent "$OP" vault list 2>&1)
+check "signed op: runs after the loaded-code check" [ "$out" = "vault list" ]
 stop_daemon
 OPPROXY_TEST_SWAP_OP=/bin/ls OP_REQUIREMENT="anchor apple" start_daemon approved
-out=$(agent "$OP" read op://signed/x/y 2>&1); rc=$?
+out=$(agent "$OP" vault list 2>&1); rc=$?
 check "swapped op: refused" grep -q "changed between its 1Password signature check and launch" <<<"$out"
 check "swapped op: nothing ran" [ $rc = 1 ]
 stop_daemon
@@ -413,7 +443,7 @@ start_daemon approved
 # --- revoke is picked up by the running daemon
 "$BIN" revoke sess-A >/dev/null
 agent "$OP" read op://a/b/c >/dev/null
-check "revoke: running daemon prompts again" [ "$(count 'prompting: claude:sess-A op read op://a/b/c$')" = 3 ]
+check "revoke: running daemon prompts again" [ "$(count 'prompting: claude:sess-A op read op://a/b/c → a / b')" = 3 ]
 
 # --- the Installed switch
 "$BIN" disable >/dev/null
@@ -439,7 +469,7 @@ PY
 for _ in $(seq 50); do [ -S "$WORK/st/scripts.sock" ] && break; sleep 0.1; done
 SPACETERM_HOME="$WORK/st" start_daemon approved
 SPACETERM_NODE_ID=node-1 SPACETERM_SURFACE_ID=pty-2 SID=sess-N agent "$OP" read op://n/a/me >/dev/null
-check "spaceterm: dialog shows the agent's name" grep -q '"label":"fix flaky tests".*"requester":"Kevin (Claude Code)"' "$LOG"
+check "spaceterm: dialog shows the agent's name" grep -q '"headline":"Kevin".*"label":"fix flaky tests".*"requester":"Kevin (Claude Code)"' "$LOG"
 check "spaceterm: approval stores the title" grep -q '"sessionLabel" : "fix flaky tests"' "$OPPROXY_HOME/approvals.json"
 check "spaceterm: approval never stores the name" not_in Kevin "$OPPROXY_HOME/approvals.json"
 kill "$SPACETERM_PID" 2>/dev/null

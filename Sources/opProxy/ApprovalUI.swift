@@ -235,7 +235,9 @@ final class ApprovalView: NSView {
         ])
         let headerViews = header(prompt)
         headerViews.forEach { stack.addArrangedSubview($0) }
-        for view in headerViews.dropLast() { stack.setCustomSpacing(5, after: view) }
+        for view in headerViews.dropLast() { stack.setCustomSpacing(4, after: view) }
+        stack.setCustomSpacing(10, after: headerViews[0])
+        stack.setCustomSpacing(10, after: headerViews[2])
         stack.addArrangedSubview(requestCard(prompt))
         switch prompt.requester {
         case .agent(let agent):
@@ -311,14 +313,12 @@ final class ApprovalView: NSView {
 
     // MARK: Sections
 
+    /// Who is asking, then the item, both in the largest type: the two things to check
+    /// before touching.
     private func header(_ prompt: ApprovalPrompt) -> [NSView] {
-        let agent = prompt.requester.name
-        let action = prompt.description.action
-        let heading = NSTextField(labelWithString: prompt.description.subject != nil
-            ? "\(agent) wants access to"
-            : "\(agent) wants to \(action.prefix(1).lowercased() + action.dropFirst())")
-        heading.font = .systemFont(ofSize: 16, weight: .semibold)
-        heading.textColor = Caution.text
+        let kicker = NSTextField(labelWithString: "⚠︎  1PASSWORD SECURITY APPROVAL")
+        kicker.font = .systemFont(ofSize: 11, weight: .heavy)
+        kicker.textColor = Caution.accent
         waitingLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         waitingLabel.textColor = Caution.accent
         waitingLabel.isHidden = true
@@ -328,58 +328,64 @@ final class ApprovalView: NSView {
         copyButton.contentTintColor = Caution.secondary
         copyButton.target = self
         copyButton.action = #selector(copyTranscript)
-        let title = NSStackView(views: [heading, NSView(), waitingLabel, copyButton])
-        title.orientation = .horizontal
-        title.alignment = .firstBaseline
-        title.widthAnchor.constraint(equalToConstant: Self.inner).isActive = true
+        let top = NSStackView(views: [kicker, NSView(), waitingLabel, copyButton])
+        top.orientation = .horizontal
+        top.alignment = .centerY
+        top.widthAnchor.constraint(equalToConstant: Self.inner).isActive = true
+
+        let requester = prompt.requester
+        let who = Self.headline(NSAttributedString(string: requester.headline, attributes: [
+            .font: NSFont.systemFont(ofSize: Self.headlineSize + 4, weight: .heavy), .foregroundColor: Caution.text]))
 
         let row = NSStackView()
         row.orientation = .horizontal
         row.spacing = 8
-        let whereText: String
-        switch prompt.requester {
+        var whereParts: [String]
+        switch requester {
         case .agent(let a):
-            whereText = a.surface?.title.map { "in “\($0)”" } ?? "in an untitled session"
+            // The kind is already in the headline when Spaceterm hasn't named the agent.
+            whereParts = (a.surface?.agentName != nil ? [requester.kind] : [])
+                + [a.surface?.title.map { "in “\($0)”" } ?? "in an untitled session"]
         case .terminal(let t):
-            whereText = (["in a terminal tab"] + [t.info.tty, t.surface?.title.map { "“\($0)”" }].compactMap { $0 })
-                .joined(separator: " · ")
+            whereParts = ["in a terminal tab"] + [t.info.tty, t.surface?.title.map { "“\($0)”" }].compactMap { $0 }
         }
+        let whereText = whereParts.joined(separator: " · ")
         let session = NSTextField(labelWithString: whereText)
         session.font = .systemFont(ofSize: 13)
         session.textColor = Caution.secondary
         session.lineBreakMode = .byTruncatingTail
         session.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         row.addArrangedSubview(session)
-        if prompt.requester.spacetermURL != nil {
+        if requester.spacetermURL != nil {
             let link = NSButton(title: "Open in Spaceterm ↗", target: self, action: #selector(openSession))
             link.isBordered = false
             link.contentTintColor = Caution.link
             link.font = .systemFont(ofSize: 13)
             row.addArrangedSubview(link)
         }
-        let kicker = NSTextField(labelWithString: "⚠︎  1PASSWORD SECURITY APPROVAL")
-        kicker.font = .systemFont(ofSize: 11, weight: .heavy)
-        kicker.textColor = Caution.accent
-        let hero = hero(prompt)
-        transcript.append(([kicker.stringValue, heading.stringValue] + [hero?.stringValue, whereText].compactMap { $0 })
+
+        let wants = Self.label("wants access to", size: 13)
+        let target = prompt.target
+        let itemText = NSMutableAttributedString(string: target.vaultName, attributes: [
+            .font: NSFont.systemFont(ofSize: Self.headlineSize, weight: .medium), .foregroundColor: Caution.text])
+        itemText.append(NSAttributedString(string: " / ", attributes: [
+            .font: NSFont.systemFont(ofSize: Self.headlineSize, weight: .light), .foregroundColor: Caution.secondary]))
+        itemText.append(NSAttributedString(string: target.title, attributes: [
+            .font: NSFont.systemFont(ofSize: Self.headlineSize, weight: .heavy), .foregroundColor: Caution.accent]))
+        let item = Self.headline(itemText)
+
+        transcript.append([kicker.stringValue, who.stringValue, whereText, wants.stringValue, target.label]
             .joined(separator: "\n"))
-        return [kicker, title] + (hero.map { [$0] } ?? []) + [row]
+        return [top, who, row, wants, item]
     }
 
-    /// The item being accessed, as the headline: it's what the approval is really about.
-    private func hero(_ prompt: ApprovalPrompt) -> NSTextField? {
-        guard let subject = prompt.description.subject else { return nil }
-        let text = NSMutableAttributedString(string: prompt.resolvedItem ?? subject, attributes: [
-            .font: NSFont.systemFont(ofSize: 26, weight: .heavy), .foregroundColor: Caution.accent])
-        if prompt.resolvedItem != nil {
-            // The opaque ID the command actually used.
-            text.append(NSAttributedString(string: "\n" + subject, attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: Caution.secondary]))
-        }
+    static let headlineSize: CGFloat = 28
+
+    private static func headline(_ text: NSAttributedString) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: "")
         field.attributedStringValue = text
         field.isSelectable = true
-        field.preferredMaxLayoutWidth = Self.inner
+        field.preferredMaxLayoutWidth = inner
         return field
     }
 
@@ -393,23 +399,15 @@ final class ApprovalView: NSView {
             grid.addRow(with: [Self.label(label, size: 13), field])
             lines.append("\(label): \(field.stringValue)")
         }
-        for detail in prompt.description.details {
-            let value = detail.value
-            let field: NSTextField
+        row("Request", Self.value(prompt.item.action, size: 14, weight: .medium))
+        for detail in prompt.item.details {
             switch detail.style {
-            case .normal where detail.label == "Vault" && prompt.resolvedVault != nil:
-                // The vault's name, with the ID the command used beside it.
-                field = Self.value("", size: 14)
-                let text = NSMutableAttributedString(string: prompt.resolvedVault!, attributes: [
-                    .font: NSFont.systemFont(ofSize: 14, weight: .medium), .foregroundColor: Caution.text])
-                text.append(NSAttributedString(string: "  " + value, attributes: [
-                    .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular), .foregroundColor: Caution.secondary]))
-                field.attributedStringValue = text
-            case .normal: field = Self.value(value, size: 14, weight: .medium)
-            case .placeholder: field = Self.value(value, size: 14, color: Caution.secondary)
+            case .normal: row(detail.label, Self.value(detail.value, size: 14, weight: .medium))
+            case .placeholder: row(detail.label, Self.value(detail.value, size: 14, color: Caution.secondary))
             }
-            row(detail.label, field)
         }
+        row("Item ID", Self.value(prompt.target.itemId, size: 12, mono: true, color: Caution.secondary))
+        row("Vault ID", Self.value(prompt.target.vaultId, size: 12, mono: true, color: Caution.secondary))
         let command = "op " + prompt.request.argv.map(shellQuote).joined(separator: " ")
         row("Command", Self.value(command, size: 12, mono: true))
         Self.styleLabelColumn(grid)
@@ -768,11 +766,12 @@ final class ScriptedApprover: LocalApprover {
 
     func requestApproval(_ prompt: ApprovalPrompt, completion: @escaping (Decision) -> Void) {
         let shown: [String: Any] = [
-            "summary": prompt.description.summary,
-            "subject": prompt.description.subject ?? NSNull(),
-            "resolvedItem": prompt.resolvedItem ?? NSNull(),
-            "resolvedVault": prompt.resolvedVault ?? NSNull(),
-            "details": prompt.description.details.map { "\($0.label)=\($0.value)" },
+            "summary": prompt.item.summary(prompt.target),
+            "item": prompt.target.title,
+            "vault": prompt.target.vaultName,
+            "itemId": prompt.target.itemId,
+            "details": prompt.item.details.map { "\($0.label)=\($0.value)" },
+            "headline": prompt.requester.headline,
             "requester": prompt.requester.name,
             "label": prompt.requester.surfaceTitle ?? NSNull(),
         ]
