@@ -79,10 +79,17 @@ case "daemon":
     auth.promptObserver = authContext
     do { try daemon.start() } catch { fail("could not start: \(error)") }
     feed.authStatus = { (auth.current, auth.isRefreshing) }
-    feed.start([FeedSocket(path: paths.approvalFeed, log: log)])
+    // CloudKit needs a build signed with the provisioning profile; others serve Spaceterm only.
+    let cloud = CloudTransport.available ? CloudTransport(linksURL: paths.cloudLinks, log: log) : nil
+    feed.start([FeedSocket(path: paths.approvalFeed, log: log)] + [cloud].compactMap { $0 })
+    let pairing = cloud.map { CloudPairing(transport: $0, log: log) }
+    if let file = TestKnobs.value("OPPROXY_TEST_CLOUD_PAIR"), let pairing {
+        pairing.testPayloadFile = URL(fileURLWithPath: file)
+        DispatchQueue.main.async { pairing.start() }
+    }
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
-    let menuBar = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? MenuBarController(daemon: daemon) : nil
+    let menuBar = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? MenuBarController(daemon: daemon, pairing: pairing) : nil
     withExtendedLifetime((menuBar, authContext, systemEvents)) { app.run() }
 
 case "disable", "enable":
@@ -99,6 +106,9 @@ case "keygen":
     } catch { fail("could not create the Secure Enclave approval key: \(error)") }
 
 #if OPPROXY_TESTING
+case "test-cloud-phone":
+    CloudTestPhone.run(Array(arguments.dropFirst(2)), paths: paths)
+
 case "render-dialog":
     DialogPreview.render(to: URL(fileURLWithPath: arguments.dropFirst(2).first { !$0.hasPrefix("-") } ?? "."),
                          onScreen: arguments.contains("--on-screen"))

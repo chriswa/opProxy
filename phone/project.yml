@@ -1,0 +1,84 @@
+name: OpProxyPhone
+options:
+  bundleIdPrefix: com.chriswa
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "13.0"
+packages:
+  opProxy:
+    path: ..
+settings:
+  base:
+    DEVELOPMENT_TEAM: 7H2524M5TN
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  OpProxyPhone:
+    type: application
+    platform: iOS
+    sources: [App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chriswa.opproxy.phone
+        PRODUCT_NAME: opProxy
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: opProxy
+        INFOPLIST_KEY_NSCameraUsageDescription: Scans the pairing code your Mac shows.
+        INFOPLIST_KEY_UIBackgroundModes: remote-notification
+        TARGETED_DEVICE_FAMILY: "1"
+    entitlements:
+      path: App/OpProxyPhone.entitlements
+      properties:
+        aps-environment: development
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.chriswa.opproxy]
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.usernotifications.time-sensitive: true
+    dependencies:
+      - target: OpProxyPhoneNotifications
+      - package: opProxy
+        product: FeedProtocol
+  OpProxyPhoneNotifications:
+    type: app-extension
+    platform: iOS
+    sources: [NotificationService]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chriswa.opproxy.phone.notifications
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: opProxy Notifications
+    info:
+      path: NotificationService/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    entitlements:
+      path: NotificationService/OpProxyPhoneNotifications.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.chriswa.opproxy]
+        com.apple.developer.icloud-services: [CloudKit]
+    dependencies:
+      - package: opProxy
+        product: FeedProtocol
+  MacSigning:
+    type: application
+    platform: macOS
+    sources: [MacSigning]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.chriswa.opproxy
+        PRODUCT_NAME: opProxy
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: YES
+    entitlements:
+      path: MacSigning/opProxy.entitlements
+      properties:
+        com.apple.developer.aps-environment: development
+        com.apple.developer.icloud-container-identifiers: [iCloud.com.chriswa.opproxy]
+        com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.team-identifier: 7H2524M5TN
+        com.apple.application-identifier: 7H2524M5TN.com.chriswa.opproxy

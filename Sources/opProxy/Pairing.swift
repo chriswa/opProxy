@@ -45,7 +45,7 @@ private final class PairingPrompt: NSObject {
         super.init()
         alert.messageText = "Pair “\(name)” with opProxy?"
         alert.informativeText = "This phone wants to approve 1Password requests from opProxy, including lasting approvals. "
-            + "Only pair it if you just asked to, in the Spaceterm app.\n\nCheck your phone shows the same fingerprint:"
+            + "Only pair it if you just asked to on that phone.\n\nCheck your phone shows the same fingerprint:"
         alert.icon = NSImage(systemSymbolName: "iphone", accessibilityDescription: "Phone")
         let print = NSTextField(labelWithString: fingerprint)
         print.font = .monospacedSystemFont(ofSize: 20, weight: .semibold)

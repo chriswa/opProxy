@@ -6,6 +6,8 @@ import OpProxyCore
 /// it's gone. The menu shows the exact expiry and offers an early refresh.
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let daemon: Daemon
+    /// Present when this build can use CloudKit (it's signed with the provisioning profile).
+    private let pairing: CloudPairing?
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let detailLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -20,8 +22,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var lastError: String?
     private var timer: Timer?
 
-    init(daemon: Daemon) {
+    init(daemon: Daemon, pairing: CloudPairing?) {
         self.daemon = daemon
+        self.pairing = pairing
         super.init()
         // Lets Ice and macOS remember the item's position.
         item.autosaveName = "opProxy"
@@ -201,6 +204,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             none.isEnabled = false
             submenu.addItem(none)
         }
+        if pairing != nil {
+            let pair = NSMenuItem(title: "Pair an iPhone…", action: #selector(pairPhone), keyEquivalent: "")
+            pair.target = self
+            submenu.addItem(pair)
+            submenu.addItem(.separator())
+        }
         for phone in phones {
             let item = NSMenuItem(title: "Unpair \(phone.name) · \(phone.fingerprint)", action: #selector(unpair(_:)), keyEquivalent: "")
             item.target = self
@@ -210,6 +219,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
         phonesItem.submenu = submenu
     }
+
+    @objc private func pairPhone() { pairing?.start() }
 
     @objc private func unpair(_ sender: NSMenuItem) {
         guard let keyId = sender.representedObject as? String else { return }

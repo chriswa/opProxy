@@ -30,6 +30,8 @@ public struct Paths {
     public var approvalKey: URL { stateDir.appendingPathComponent("approval-key.se") }
     /// Where pending approvals are published for the Spaceterm phone app (APPROVAL_FEED.md).
     public var approvalFeed: URL { stateDir.appendingPathComponent("approval-feed.sock") }
+    /// The paired iPhones' CloudKit zones the Mac has joined.
+    public var cloudLinks: URL { stateDir.appendingPathComponent("cloud-links.json") }
     /// Phones allowed to answer approvals, each entry signed with the approval key.
     public var pairedDevices: URL { stateDir.appendingPathComponent("paired-devices.json") }
 

@@ -40,17 +40,7 @@ cat > "$APP/Contents/Info.plist" <<INFO
 </dict>
 </plist>
 INFO
-# Same signing as voiceop/claudeusagetray's make-app.sh: a real identity gives a stable
-# designated requirement, so macOS keeps its grants across rebuilds.
-IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-    | awk -F'"' '/Developer ID Application|Apple Development/{print $2; exit}')"
-if [ -n "$IDENTITY" ]; then
-    echo "signing as: $IDENTITY"
-    codesign --force --sign "$IDENTITY" --options runtime "$APP"
-else
-    echo "signing ad-hoc (no identity found — macOS will re-prompt after every rebuild)"
-    codesign --force --sign - "$APP"
-fi
+"$ROOT/scripts/sign-app.sh" "$APP"
 # `op` (the shim) and `opProxy` (the CLI) run the bundle's executable.
 rm -f "$ROOT/bin/opProxy"
 ln -sfn opProxy.app/Contents/MacOS/opProxy "$ROOT/bin/opProxy"
