@@ -14,6 +14,8 @@ settings:
     SWIFT_VERSION: "5.9"
     MARKETING_VERSION: "0.1"
     CURRENT_PROJECT_VERSION: "1"
+# Every target uses CloudKit's Production environment, even in development builds, so the
+# Mac and the phone always meet there. Its schema is phone/schema.ckdb.
 targets:
   OpProxyPhone:
     type: application
@@ -36,6 +38,7 @@ targets:
         aps-environment: development
         com.apple.developer.icloud-container-identifiers: [iCloud.com.chriswa.opproxy]
         com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.icloud-container-environment: Production
         com.apple.developer.usernotifications.time-sensitive: true
     dependencies:
       - target: OpProxyPhoneNotifications
@@ -61,6 +64,7 @@ targets:
       properties:
         com.apple.developer.icloud-container-identifiers: [iCloud.com.chriswa.opproxy]
         com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.icloud-container-environment: Production
     dependencies:
       - package: opProxy
         product: FeedProtocol
@@ -81,5 +85,6 @@ targets:
         com.apple.developer.aps-environment: development
         com.apple.developer.icloud-container-identifiers: [iCloud.com.chriswa.opproxy]
         com.apple.developer.icloud-services: [CloudKit]
+        com.apple.developer.icloud-container-environment: Production
         com.apple.developer.team-identifier: 7H2524M5TN
         com.apple.application-identifier: 7H2524M5TN.com.chriswa.opproxy
