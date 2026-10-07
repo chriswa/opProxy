@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: FeedModel
+    @State private var pairing = false
 
     var body: some View {
         Group {
@@ -12,9 +13,15 @@ struct ContentView: View {
                 // The oldest request, alone; answering it (here or on the Mac) brings up the next.
                 RequestView(item: item, waiting: model.items.count - 1).id(item.id)
             } else {
-                ContentUnavailableView("No pending requests", systemImage: "checkmark.shield",
-                                       description: Text("When an agent asks for a 1Password secret, it shows up here."))
-                    .safeAreaInset(edge: .bottom) { StatusBar() }
+                ContentUnavailableView {
+                    Label("No pending requests", systemImage: "checkmark.shield")
+                } description: {
+                    Text("When an agent asks for a 1Password secret, it shows up here.")
+                } actions: {
+                    Button("Pair with a Mac") { pairing = true }.foregroundStyle(Theme.dim)
+                }
+                .safeAreaInset(edge: .bottom) { StatusBar() }
+                .sheet(isPresented: $pairing) { PairingView() }
             }
         }
         .foregroundStyle(Theme.text)

@@ -18,7 +18,7 @@ struct PairingView: View {
                     .disabled(busy || !DataScannerViewController.isSupported)
             }
             Section("Or paste the code") {
-                TextField("opproxy-pair:1:…", text: $pasted)
+                TextField("opproxy-pair:2:…", text: $pasted)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .font(.body.monospaced())
@@ -78,7 +78,7 @@ private struct QRScanner: UIViewControllerRepresentable {
 
         func dataScanner(_ scanner: DataScannerViewController, didAdd items: [RecognizedItem], allItems: [RecognizedItem]) {
             for case .barcode(let code) in items {
-                guard !done, let payload = code.payloadStringValue, CloudFeed.Rendezvous.code(fromQR: payload) != nil else { continue }
+                guard !done, let payload = code.payloadStringValue, CloudFeed.Rendezvous.parse(qr: payload) != nil else { continue }
                 done = true
                 scanner.stopScanning()
                 found(payload)

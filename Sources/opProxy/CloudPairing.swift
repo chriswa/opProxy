@@ -3,10 +3,11 @@ import CloudKit
 import CoreImage
 import OpProxyCore
 
-/// Pairs an iPhone over CloudKit. The Mac shows a QR code with a one-time code; the phone
-/// scans it and leaves its zone's share URL in the public database, sealed with that code
-/// (CloudFeed.Rendezvous). The Mac joins the zone, and from then on the phone's `pair`
-/// message arrives in its inbox and is confirmed with Touch ID like any other.
+/// Pairs an iPhone over CloudKit. The Mac shows a QR code with a one-time code and its own
+/// iCloud user; the phone invites that user, and no one else, to its zone's share and leaves
+/// the invitation in the public database, sealed with the code (CloudFeed.Rendezvous). The
+/// Mac accepts it, and from then on the phone's `pair` message arrives in its inbox and is
+/// confirmed with Touch ID like any other.
 final class CloudPairing {
     private let transport: CloudTransport
     private let log: Log
@@ -24,20 +25,11 @@ final class CloudPairing {
     /// Shows the QR code and waits up to 10 minutes for a phone. Main thread.
     func start() {
         task?.cancel()
-        let code = CloudFeed.Rendezvous.newCode()
-        let payload = CloudFeed.Rendezvous.qrPayload(code: code)
-        let window = QRWindow(payload: payload) { [weak self] in self?.task?.cancel() }
-        self.window = window
-        if let testPayloadFile {
-            try? payload.write(to: testPayloadFile, atomically: true, encoding: .utf8)
-        } else {
-            window.show()
-        }
         transport.pairingUntil = Date() + 600
         task = Task { [self] in
             let outcome: String
             do {
-                outcome = try await rendezvous(code)
+                outcome = try await pair()
             } catch is CancellationError {
                 outcome = "cancelled"
             } catch {
@@ -46,36 +38,56 @@ final class CloudPairing {
             log.write("phone pairing: \(outcome)")
             await MainActor.run { [self] in
                 if outcome.hasPrefix("linked") {
-                    window.finish("Joined. Confirm the phone's fingerprint on the next prompt.")
+                    window?.finish("Joined. Confirm the phone's fingerprint on the next prompt.")
                 } else if outcome != "cancelled" {
-                    window.finish("Pairing didn't finish: \(outcome)")
+                    window?.finish("Pairing didn't finish: \(outcome)")
                 }
             }
         }
     }
 
-    private func rendezvous(_ code: Data) async throws -> String {
+    private func pair() async throws -> String {
+        // The phone shares its zone with this iCloud user alone.
+        let me = try await container.userRecordID().recordName
+        let code = CloudFeed.Rendezvous.newCode()
+        let payload = CloudFeed.Rendezvous.qrPayload(code: code, macUser: me)
+        await MainActor.run { [self] in
+            let window = QRWindow(payload: payload) { [weak self] in self?.task?.cancel() }
+            self.window = window
+            if let testPayloadFile {
+                try? payload.write(to: testPayloadFile, atomically: true, encoding: .utf8)
+            } else {
+                window.show()
+            }
+        }
         let id = CKRecord.ID(recordName: CloudFeed.Rendezvous.recordName(code: code))
         let deadline = Date() + 600
         while Date() < deadline {
             try Task.checkCancellation()
             if let record = try? await container.publicCloudDatabase.record(for: id),
                let sealed = record[CloudFeed.Rendezvous.sealed] as? Data {
-                guard let url = CloudFeed.Rendezvous.open(sealed, code: code) else { return "the phone's reply didn't open" }
-                try await join(url)
-                return "linked"
+                guard let invitation = CloudFeed.Rendezvous.open(sealed, code: code) else { return "the phone's reply didn't open" }
+                return try await join(invitation)
             }
             try await Task.sleep(nanoseconds: 2_000_000_000)
         }
         return "timed out"
     }
 
-    private func join(_ url: URL) async throws {
-        let metadata = try await container.shareMetadata(for: url)
-        let zoneID = metadata.share.recordID.zoneID
-        let own = metadata.participantRole == .owner
-        if !own { _ = try await container.accept(metadata) }
-        transport.link(CloudLink(zoneName: zoneID.zoneName, ownerName: zoneID.ownerName, shared: !own, linkedAt: Date()))
+    private func join(_ invitation: CloudFeed.Rendezvous.Invitation) async throws -> String {
+        switch invitation {
+        case .ownZone(let name):
+            transport.link(CloudLink(zoneName: name, ownerName: CKCurrentUserDefaultName, shared: false, linkedAt: Date()))
+            return "linked: own zone"
+        case .share(let url):
+            let metadata = try await container.shareMetadata(for: url)
+            // Joining through an open link would mean anyone holding it could too.
+            guard metadata.share.publicPermission == .none else { return "refused: the phone's share is open to anyone with its link" }
+            _ = try await container.accept(metadata)
+            let zoneID = metadata.share.recordID.zoneID
+            transport.link(CloudLink(zoneName: zoneID.zoneName, ownerName: zoneID.ownerName, shared: true, linkedAt: Date()))
+            return "linked: invited to a private share with \(metadata.share.participants.count) participants"
+        }
     }
 }
 

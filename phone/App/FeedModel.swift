@@ -24,6 +24,8 @@ final class FeedModel: ObservableObject {
     private var subscribed = false
     private var refreshing = false
     private var poller: Task<Void, Never>?
+    /// When the Mac last wrote its `hello`: it does so whenever it joins the zone.
+    private var helloWrittenAt: Date?
 
     // MARK: Polling
 
@@ -149,6 +151,7 @@ final class FeedModel: ObservableObject {
             guard let json = record.encryptedValues[CloudFeed.State.message] as? String,
                   let message = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return }
             if record.recordID.recordName == CloudFeed.State.hello {
+                helloWrittenAt = record.modificationDate
                 update(\.pairedKeys, message["pairedKeys"] as? [String] ?? [])
             } else if let status = message["status"],
                       let data = try? JSONSerialization.data(withJSONObject: status) {
@@ -209,30 +212,29 @@ final class FeedModel: ObservableObject {
     /// Shares the zone with the Mac whose QR code was scanned, waits for it to join, then asks
     /// it to trust this phone's key. Returns nil once paired, else why not.
     func pair(qr: String, progress: @escaping (String) -> Void) async -> String? {
-        guard let code = CloudFeed.Rendezvous.code(fromQR: qr) else { return "That isn't an opProxy pairing code." }
+        guard let (code, macUser) = CloudFeed.Rendezvous.parse(qr: qr) else {
+            return "That isn't an opProxy pairing code. Update opProxy on the Mac if it's an older one."
+        }
         await setUp()
         guard ready else { return lastError }
         let rendezvousID = CKRecord.ID(recordName: CloudFeed.Rendezvous.recordName(code: code))
         defer { Task { [db = container.publicCloudDatabase] in _ = try? await db.deleteRecord(withID: rendezvousID) } }
         do {
-            progress("Sharing this phone's request list with the Mac…")
-            let url = try await shareURL()
+            progress("Inviting the Mac's iCloud account…")
+            let invitation = try await invite(macUser)
+            let started = Date()
             let rendezvous = CKRecord(recordType: CloudFeed.Rendezvous.type, recordID: rendezvousID)
-            rendezvous[CloudFeed.Rendezvous.sealed] = try CloudFeed.Rendezvous.seal(url, code: code)
+            rendezvous[CloudFeed.Rendezvous.sealed] = try CloudFeed.Rendezvous.seal(invitation, code: code)
             _ = try await container.publicCloudDatabase.save(rendezvous)
 
+            // The Mac rewrites its `hello` once it has joined; an older one doesn't count.
             progress("Waiting for the Mac to join…")
-            let before = pairedKeys
-            pairedKeys = nil
-            for _ in 0..<60 where pairedKeys == nil {
+            for _ in 0..<60 where !((helloWrittenAt ?? .distantPast) > started) {
                 try await Task.sleep(nanoseconds: 2_000_000_000)
                 token = nil
                 await refresh()
             }
-            guard pairedKeys != nil else {
-                pairedKeys = before
-                return "The Mac didn't join. Is its pairing window still open?"
-            }
+            guard (helloWrittenAt ?? .distantPast) > started else { return "The Mac didn't join. Is its pairing window still open?" }
             if paired { return nil }
 
             progress("Confirm on the Mac: check it shows \(PhoneKey.fingerprint), then use Touch ID.")
@@ -245,16 +247,33 @@ final class FeedModel: ObservableObject {
         }
     }
 
-    /// The zone's share: anyone with its URL can join, and only the Mac ever gets it.
-    private func shareURL() async throws -> URL {
+    /// Lets the Mac's iCloud user, and only it, into this phone's zone. The share is never
+    /// open to whoever holds its link: the Mac is invited by its user record, so the link
+    /// works for no one else. Participants left from earlier pairings are removed.
+    private func invite(_ macUser: String) async throws -> CloudFeed.Rendezvous.Invitation {
         let id = CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: zoneID)
-        if let existing = try? await db.record(for: id) as? CKShare, let url = existing.url { return url }
-        let share = CKShare(recordZoneID: zoneID)
-        share.publicPermission = .readWrite
-        share[CKShare.SystemFieldKey.title] = "opProxy approvals"
-        guard let saved = try await db.save(share) as? CKShare, let url = saved.url else {
-            throw CKError(.internalError)
+        let existing = try? await db.record(for: id) as? CKShare
+        if macUser == (try await container.userRecordID().recordName) {
+            // Same Apple ID: the Mac reads this zone directly, so a share would only be exposure.
+            if existing != nil { _ = try await db.deleteRecord(withID: id) }
+            return .ownZone(zoneID.zoneName)
         }
-        return url
+        let share = existing ?? CKShare(recordZoneID: zoneID)
+        share.publicPermission = .none
+        share[CKShare.SystemFieldKey.title] = "opProxy approvals"
+        func isMac(_ participant: CKShare.Participant) -> Bool {
+            participant.userIdentity.userRecordID?.recordName == macUser
+        }
+        for participant in share.participants where participant.role != .owner
+            && !(isMac(participant) && participant.role == .privateUser) {
+            share.removeParticipant(participant)
+        }
+        if !share.participants.contains(where: isMac) {
+            let mac = try await container.shareParticipant(forUserRecordID: CKRecord.ID(recordName: macUser))
+            mac.permission = .readWrite
+            share.addParticipant(mac)
+        }
+        guard let saved = try await db.save(share) as? CKShare, let url = saved.url else { throw CKError(.internalError) }
+        return .share(url)
     }
 }

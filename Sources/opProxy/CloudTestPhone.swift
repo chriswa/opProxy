@@ -25,6 +25,9 @@ enum CloudTestPhone {
                 case "pair" where args.count == 2: try await pair(args[1], key: key)
                 case "approve", "deny": try await answer(args[0], pick: args.dropFirst().first, key: key)
                 case "reset": try await reset()
+                case "share":
+                    let id = CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: zoneID)
+                    print((try? await db.record(for: id)) == nil ? "no share" : "shared")
                 default: throw Failure("usage: opProxy test-cloud-phone pair <qr> | approve|deny [option] | reset")
                 }
             } catch {
@@ -48,17 +51,14 @@ enum CloudTestPhone {
     }
 
     private static func pair(_ qr: String, key: P256.Signing.PrivateKey) async throws {
-        guard let code = CloudFeed.Rendezvous.code(fromQR: qr) else { throw Failure("bad QR payload") }
+        guard let (code, macUser) = CloudFeed.Rendezvous.parse(qr: qr) else { throw Failure("bad QR payload") }
+        // This stand-in phone shares the Mac's Apple ID, so there is nothing to share: the Mac
+        // reads the zone from its own private database.
+        guard macUser == (try await container.userRecordID().recordName) else { throw Failure("the QR code names another iCloud user") }
         _ = try await db.modifyRecordZones(saving: [CKRecordZone(zoneID: zoneID)], deleting: [])
-        let share = CKShare(recordZoneID: zoneID)
-        share.publicPermission = .readWrite
-        let shareID = CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: zoneID)
-        var saved = try? await db.record(for: shareID) as? CKShare
-        if saved == nil { saved = try await db.save(share) as? CKShare }
-        guard let url = saved?.url else { throw Failure("no share URL") }
         let rendezvous = CKRecord(recordType: CloudFeed.Rendezvous.type,
                                   recordID: CKRecord.ID(recordName: CloudFeed.Rendezvous.recordName(code: code)))
-        rendezvous[CloudFeed.Rendezvous.sealed] = try CloudFeed.Rendezvous.seal(url, code: code)
+        rendezvous[CloudFeed.Rendezvous.sealed] = try CloudFeed.Rendezvous.seal(.ownZone(zoneID.zoneName), code: code)
         _ = try await container.publicCloudDatabase.save(rendezvous)
         defer { Task { _ = try? await container.publicCloudDatabase.deleteRecord(withID: rendezvous.recordID) } }
         print("rendezvous written")

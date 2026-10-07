@@ -62,6 +62,7 @@ out=$("$BIN" test-cloud-phone pair "$(cat "$QR")" 2>&1)
 echo "$out" | sed 's/^/     /'
 check "phone paired over CloudKit" grep -q '"ok":true' <<<"$out"
 check "mac linked the zone" grep -q "cloud feed: linked own zone approvalFeedTest" "$LOG"
+check "same Apple ID: the zone isn't shared at all" grep -q "no share" <<<"$("$BIN" test-cloud-phone share)"
 
 agent "$OP" read op://v/cloud/password > "$WORK/read.out" 2>&1 & READ=$!
 out=$("$BIN" test-cloud-phone approve once 2>&1)
