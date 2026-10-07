@@ -67,6 +67,9 @@ public enum DaemonMessage: Codable {
     case status
     /// Authorizes a fresh 1Password session and switches to it; replies with `DaemonStatus`.
     case refresh
+    /// Opens the iPhone pairing QR code on the Mac; replies with `DaemonStatus`, whose error
+    /// says why not.
+    case pairPhone
 }
 
 public struct DaemonStatus: Codable {

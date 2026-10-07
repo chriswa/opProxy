@@ -78,7 +78,7 @@ Every request that would show the dialog is also published for paired phones, in
 - **Same options as the desktop.** The phone shows what the dialog shows (the item, the request, the `op` command, the agent's shell command and last message, PIDs and directory) and offers the same choices as one list: **Once**, then **1 Day** and **Forever**, each for this agent or all agents, for agents; **Once · This Terminal Tab** for terminals.
 - **The first answer wins.** The dialog and the phone ask at the same time. Answer on either and the other one goes away; a late answer from the other side is refused. A request leaves the phone when it's answered anywhere or times out, and its countdown on the phone starts when its dialog appears on the Mac.
 - **Phone approvals work like Touch ID ones.** A lasting agent approval from the phone is stored and lasts just as long. It can't be signed by the Mac's Secure Enclave key without your Touch ID, so it's stored with the phone's own signed reply instead. That reply commits to the exact entry (which agents, item, approval time and expiry), so it can't be edited, moved to another request, widened to all agents or extended.
-- **Pairing the iPhone app.** Choose **Paired Phones → Pair an iPhone…** on the Mac and scan its QR code in the app. The code is one-time and lasts 10 minutes. The phone leaves its zone's share link in the container's public database, sealed with a key derived from the code under a name derived from it, so only someone who saw the code can find or open it. The Mac joins the zone, and the pairing below follows.
+- **Pairing the iPhone app.** Choose **Paired Phones → Pair an iPhone…** on the Mac (or run `opProxy pair-iphone`) and scan its QR code in the app. The code is one-time and lasts 10 minutes. The phone leaves its zone's share link in the container's public database, sealed with a key derived from the code under a name derived from it, so only someone who saw the code can find or open it. The Mac joins the zone, and the pairing below follows.
 - **Pairing.** The phone asks to pair over the feed. The Mac shows the phone's name and key fingerprint, with the approval dialog's chime; check the phone shows the same fingerprint, click **Pair…**, then touch Touch ID. The paired key is signed with the approval key, so nothing can pair a phone without your Touch ID.
 - **Unpairing.** `opProxy devices` lists paired phones with their fingerprints, and `opProxy unpair <key-id> | --all` (or the menu's **Paired Phones**) removes one. Unpairing a phone also ends every lasting approval made on it.
 
@@ -124,6 +124,7 @@ opProxy status | refresh
 opProxy list | revoke --all | revoke <session-id>
 opProxy disable | enable
 opProxy devices | unpair <key-id> | unpair --all
+opProxy pair-iphone                       # opens the iPhone app's pairing QR code
 ```
 
 The log is `~/.opProxy/daemon.log`. It records proxied command lines only; passthrough commands, which can carry secrets as arguments, are never logged.

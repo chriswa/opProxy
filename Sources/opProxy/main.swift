@@ -83,6 +83,7 @@ case "daemon":
     let cloud = CloudTransport.available ? CloudTransport(linksURL: paths.cloudLinks, log: log) : nil
     feed.start([FeedSocket(path: paths.approvalFeed, log: log)] + [cloud].compactMap { $0 })
     let pairing = cloud.map { CloudPairing(transport: $0, log: log) }
+    daemon.onPairPhone = pairing.map { pairing in { pairing.start() } }
     if let file = TestKnobs.value("OPPROXY_TEST_CLOUD_PAIR"), let pairing {
         pairing.testPayloadFile = URL(fileURLWithPath: file)
         DispatchQueue.main.async { pairing.start() }
@@ -171,6 +172,11 @@ case "unpair":
         let n = try devices.unpair { target == "--all" || ids.contains($0.keyId) }
         print("Unpaired \(n) phone\(n == 1 ? "" : "s"). Approvals made on \(n == 1 ? "it" : "them") no longer verify.")
     } catch { fail("could not update \(paths.pairedDevices.path): \(error)") }
+
+case "pair-iphone":
+    guard let status = daemonStatus(.pairPhone) else { fail("the opProxy daemon isn't running") }
+    if let error = status.error { fail(error) }
+    print("The pairing code is open on the Mac. Scan it with the opProxy iPhone app.")
 
 case "status", "refresh":
     let refresh = arguments[1] == "refresh"

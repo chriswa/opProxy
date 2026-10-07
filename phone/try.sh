@@ -2,7 +2,7 @@
 # Try the iPhone app against a test daemon that runs beside the installed opProxy, with its
 # own state in ~/.opProxy-try, its own menu bar icon, and a stub `op` (no 1Password).
 #   phone/try.sh start     build, sign and start the test daemon; install the app if the iPhone is reachable
-#   phone/try.sh pair      restart the test daemon and open a pairing QR code to scan
+#   phone/try.sh pair      open the test daemon's pairing QR code
 #   phone/try.sh request   a fake Claude Code agent asks for a secret
 #   phone/try.sh stop
 set -euo pipefail
@@ -44,7 +44,7 @@ esac
 echo "(stub op) $*"
 STUB
     chmod +x "$OPPROXY_REAL_OP"
-    OPPROXY_NO_AUTO_AUTH=1 OPPROXY_OP_REQUIREMENT=none OPPROXY_TEST_CLOUD_PAIR=${PAIR_FILE:-} nohup "$BIN" daemon >>"$OPPROXY_HOME/launch.log" 2>&1 &
+    OPPROXY_NO_AUTO_AUTH=1 OPPROXY_OP_REQUIREMENT=none nohup "$BIN" daemon >>"$OPPROXY_HOME/launch.log" 2>&1 &
     echo $! > "$PIDFILE"
     echo "test daemon running (log: $OPPROXY_HOME/daemon.log). Pair from its menu bar icon: Paired Phones → Pair an iPhone…"
     DEVICE=$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && $0 !~ /unavailable/ {print $3; exit}')
@@ -59,22 +59,9 @@ STUB
     fi
     ;;
 pair)
-    # The daemon writes the code instead of showing its window; draw it as a QR code here.
-    export PAIR_FILE="$OPPROXY_HOME/pair-code"
-    rm -f "$PAIR_FILE"
-    "$0" start | grep -v "^installed\|no reachable"
-    for _ in $(seq 100); do [ -s "$PAIR_FILE" ] && break; sleep 0.1; done
-    swift - "$(cat "$PAIR_FILE")" "$OPPROXY_HOME/pair-qr.png" <<'QR'
-import AppKit
-import CoreImage
-let filter = CIFilter(name: "CIQRCodeGenerator")!
-filter.setValue(Data(CommandLine.arguments[1].utf8), forKey: "inputMessage")
-let image = filter.outputImage!.transformed(by: CGAffineTransform(scaleX: 16, y: 16))
-let rep = NSBitmapImageRep(cgImage: CIContext().createCGImage(image, from: image.extent)!)
-try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[2]))
-QR
-    open "$OPPROXY_HOME/pair-qr.png"
-    echo "scan the QR code with the iPhone app; it works once, for 10 minutes"
+    # The test daemon opens its own QR window, as its menu's Pair an iPhone… does.
+    [ -S "$OPPROXY_HOME/daemon.sock" ] || "$0" start
+    "$BIN" pair-iphone
     ;;
 request)
     # A stand-in Claude Code process (debug builds trust argv[0] opproxy-fake-agent).
