@@ -4,36 +4,62 @@ import VisionKit
 
 struct PairingView: View {
     @EnvironmentObject private var model: FeedModel
+    @Environment(\.dismiss) private var dismiss
     @State private var scanning = false
+    @State private var pasting = false
     @State private var pasted = ""
     @State private var progress: String?
     @State private var error: String?
     @State private var busy = false
 
     var body: some View {
-        Form {
-            Section {
-                Text("On your Mac, open the opProxy menu, choose Paired Phones → Pair an iPhone…, then scan the code it shows.")
-                Button("Scan the Mac's Code") { scanning = true }
+        VStack(spacing: 0) {
+            CautionStripe(tone: Theme.tone(nil)).frame(height: 8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    Text("Pair with your Mac").font(.largeTitle.weight(.bold))
+                    Text("On the Mac, open the opProxy menu, choose Paired Phones → Pair an iPhone…, then scan the code it shows.")
+                        .foregroundStyle(Theme.dim)
+                    Button {
+                        scanning = true
+                    } label: {
+                        Label("Scan the Mac's code", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(FilledButton())
                     .disabled(busy || !DataScannerViewController.isSupported)
-            }
-            Section("Or paste the code") {
-                TextField("opproxy-pair:2:…", text: $pasted)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.body.monospaced())
-                Button("Pair") { pair(pasted) }.disabled(busy || pasted.isEmpty)
-            }
-            Section("This phone's fingerprint") {
-                Text(PhoneKey.fingerprint).font(.title3.monospaced().weight(.semibold))
-            }
-            if let progress {
-                Section { HStack { ProgressView(); Text(progress) } }
-            }
-            if let error {
-                Section { Text(error).foregroundStyle(.red) }
+
+                    if let progress {
+                        HStack(spacing: 10) { ProgressView().tint(Theme.text); Text(progress) }
+                    }
+                    if let error {
+                        Text(error).foregroundStyle(Theme.danger)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("This phone's fingerprint").font(.subheadline).foregroundStyle(Theme.dim)
+                        Text(PhoneKey.fingerprint).font(.title3.monospaced().weight(.semibold))
+                        Text("The Mac shows the same one when it asks you to confirm.").font(.footnote).foregroundStyle(Theme.dim)
+                    }
+
+                    DisclosureGroup("Paste a code instead", isExpanded: $pasting) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            TextField("opproxy-pair:2:…", text: $pasted)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.body.monospaced())
+                                .padding(10)
+                                .background(Theme.well, in: RoundedRectangle(cornerRadius: 8))
+                            Button("Pair") { pair(pasted) }.buttonStyle(FilledButton()).disabled(busy || pasted.isEmpty)
+                        }
+                        .padding(.top, 8)
+                    }
+                    .foregroundStyle(Theme.dim)
+                }
+                .padding(20)
             }
         }
+        .foregroundStyle(Theme.text)
+        .background(Theme.background)
         .sheet(isPresented: $scanning) {
             QRScanner { payload in
                 scanning = false
@@ -51,6 +77,8 @@ struct PairingView: View {
             progress = nil
             error = failure
             busy = false
+            // Opened from the empty queue to pair again: done here.
+            if failure == nil { dismiss() }
         }
     }
 }

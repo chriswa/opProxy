@@ -1,6 +1,7 @@
 import CloudKit
 import FeedProtocol
 import Foundation
+import SwiftUI
 import UIKit
 
 /// The phone's side of the approval feed. The phone owns a zone in its private database and
@@ -14,7 +15,25 @@ final class FeedModel: ObservableObject {
     @Published private(set) var pairedKeys: [String]?
     @Published private(set) var lastError: String?
 
+    /// A request the screen keeps showing while it acknowledges an answer, after it has left
+    /// `items`.
+    @Published private(set) var held: FeedItem?
+
     var paired: Bool { pairedKeys?.contains(PhoneKey.keyId) == true }
+    /// The request on screen: the one being acknowledged, else the oldest pending.
+    var current: FeedItem? { held ?? items.first }
+    /// Pending requests behind the one on screen.
+    var waiting: Int { items.filter { $0.id != current?.id }.count }
+
+    /// Keeps `item` on screen until called again with nil, which lets it go with the
+    /// queue's transition.
+    func hold(_ item: FeedItem?) {
+        if item == nil {
+            withAnimation(.easeIn(duration: 0.35)) { held = nil }
+        } else {
+            held = item
+        }
+    }
 
     private let container = CKContainer(identifier: CloudFeed.container)
     private var db: CKDatabase { container.privateCloudDatabase }

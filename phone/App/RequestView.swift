@@ -2,15 +2,19 @@ import FeedProtocol
 import SwiftUI
 
 /// One request, the whole screen. Who is asking and for what stay at the top, the choices and
-/// the slide control stay at the bottom, and the details between them scroll. Give each
-/// request its own view identity, so a choice made on one never carries over to the next.
+/// the answers stay at the bottom, and the details between them scroll. Give each request its
+/// own view identity, so a choice made on one never carries over to the next.
 struct RequestView: View {
+    /// How an answer the Mac accepted is acknowledged before the screen moves on.
+    enum Outcome { case approved, denied }
+
     @EnvironmentObject private var model: FeedModel
     let item: FeedItem
     let waiting: Int
     @State private var picks: [String: String] = [:]
     @State private var sending = false
     @State private var error: String?
+    @State private var outcome: Outcome?
 
     var body: some View {
         if let doc = item.parsed {
@@ -24,12 +28,9 @@ struct RequestView: View {
     private func screen(_ doc: FeedDocument) -> some View {
         let tone = Theme.tone(doc.tone)
         return VStack(spacing: 0) {
-            // The stripe runs up behind the status bar, as Spaceterm's does.
-            Color.clear
-                .frame(height: 10)
-                .background(alignment: .bottom) { CautionStripe(tone: tone).ignoresSafeArea(edges: .top) }
+            CautionStripe(tone: tone).frame(height: 8)
             header(doc, tone: tone)
-            Divider().overlay(Theme.border)
+            Rectangle().fill(Theme.border).frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if let notice = doc.notice {
@@ -48,6 +49,7 @@ struct RequestView: View {
         }
         .foregroundStyle(Theme.text)
         .background(Theme.background)
+        .overlay { if let outcome { Acknowledgement(outcome: outcome) } }
         .onAppear {
             for picker in doc.pickers ?? [] where picks[picker.id] == nil {
                 picks[picker.id] = picker.default ?? picker.options.first?.id
@@ -59,29 +61,20 @@ struct RequestView: View {
 
     private func header(_ doc: FeedDocument, tone: Color) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                if let expires = item.expires {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text("Times out in \(Self.clock(expires.timeIntervalSince(context.date)))")
-                    }
-                } else {
-                    Text("Waiting its turn on the Mac")
-                }
-                Spacer()
-                if waiting > 0 { Text("\(waiting) more waiting") }
-            }
-            .font(.footnote.monospacedDigit())
-            .foregroundStyle(Theme.dim)
-
             VStack(alignment: .leading, spacing: 3) {
-                Text(doc.requester?.name ?? doc.subtitle ?? "Someone")
-                    .font(.system(size: 30, weight: .bold))
-                    .lineLimit(2)
+                HStack(alignment: .firstTextBaseline) {
+                    Text(doc.requester?.name ?? doc.subtitle ?? "Someone")
+                        .font(.system(size: 30, weight: .bold))
+                        .lineLimit(2)
+                    Spacer()
+                    if waiting > 0 {
+                        Text("\(waiting) more").font(.footnote.monospacedDigit()).foregroundStyle(Theme.dim)
+                    }
+                }
                 ForEach([doc.requester?.detail, doc.requester?.context].compactMap { $0 }, id: \.self) { line in
                     Text(line).font(.subheadline).foregroundStyle(Theme.dim).lineLimit(2)
                 }
             }
-
             VStack(alignment: .leading, spacing: 3) {
                 Label {
                     Text(doc.item?.title ?? doc.title).font(.title2.weight(.semibold)).lineLimit(2)
@@ -110,19 +103,31 @@ struct RequestView: View {
             if let error {
                 Text(error).font(.footnote).foregroundStyle(Theme.danger)
             }
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 ForEach(others, id: \.self) { action in
-                    Button(action.label) { send(action.id) }
-                        .font(.subheadline.weight(.semibold))
+                    Button { send(action.id) } label: {
+                        VStack(spacing: 1) {
+                            Text(action.label).font(.subheadline.weight(.semibold))
+                            // The deny button carries the countdown: it's what happens at zero.
+                            if action.role == "deny", let expires = item.expires {
+                                TimelineView(.periodic(from: .now, by: 1)) { context in
+                                    Text(Self.clock(expires.timeIntervalSince(context.date)))
+                                        .font(.caption2.monospacedDigit())
+                                        .opacity(0.8)
+                                }
+                            }
+                        }
                         .foregroundStyle(action.role == "deny" ? Theme.danger : Theme.text)
-                        .frame(height: 60)
-                        .padding(.horizontal, 16)
-                        .overlay(RoundedRectangle(cornerRadius: 30)
+                        .frame(width: 84, height: 52)
+                        .overlay(RoundedRectangle(cornerRadius: 26)
                             .stroke(action.role == "deny" ? Theme.danger : Theme.border, lineWidth: 1.5))
-                        .disabled(sending)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressScale())
+                    .disabled(sending || outcome != nil)
                 }
                 if let approve {
-                    SlideToApprove(label: approve.label, tone: tone, busy: sending) { send(approve.id) }
+                    SlideToApprove(label: approve.label, busy: sending, done: outcome == .approved) { send(approve.id) }
                 }
             }
         }
@@ -135,19 +140,67 @@ struct RequestView: View {
         Binding(get: { picks[picker.id] }, set: { picks[picker.id] = $0 })
     }
 
+    /// Sends the answer. The screen holds on to this request meanwhile, so it stays put
+    /// through the acknowledgement even once it has left the queue, then lets it go.
     private func send(_ action: String) {
         sending = true
         error = nil
+        model.hold(item)
         Task {
-            // Once accepted, the request leaves the queue and the next one takes its place.
-            error = await model.answer(item, action: action, picks: action == "approve" ? picks.compactMapValues { $0 } : [:])
+            let failure = await model.answer(item, action: action, picks: action == "approve" ? picks.compactMapValues { $0 } : [:])
             sending = false
+            guard failure == nil else {
+                error = failure
+                model.hold(nil)
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                return
+            }
+            let approved = action == "approve"
+            UINotificationFeedbackGenerator().notificationOccurred(approved ? .success : .warning)
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { outcome = approved ? .approved : .denied }
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            model.hold(nil)
         }
     }
 
     private static func clock(_ seconds: TimeInterval) -> String {
         let s = max(0, Int(seconds.rounded(.up)))
         return String(format: "%d:%02d", s / 60, s % 60)
+    }
+}
+
+/// The answer, confirmed: a wash of its colour and a badge that pops in.
+private struct Acknowledgement: View {
+    let outcome: RequestView.Outcome
+    @State private var shown = false
+
+    var body: some View {
+        let approved = outcome == .approved
+        let color = approved ? Theme.approve : Theme.danger
+        ZStack {
+            color.opacity(shown ? 0.28 : 0).ignoresSafeArea()
+            VStack(spacing: 12) {
+                Image(systemName: approved ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .font(.system(size: 96, weight: .bold))
+                    .foregroundStyle(.white, color)
+                    .symbolEffect(.bounce, value: shown)
+                Text(approved ? "Approved" : "Denied").font(.title.weight(.bold))
+            }
+            .padding(32)
+            .background(Theme.well.opacity(0.92), in: RoundedRectangle(cornerRadius: 28))
+            .scaleEffect(shown ? 1 : 0.4)
+            .opacity(shown ? 1 : 0)
+        }
+        .onAppear { withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) { shown = true } }
+    }
+}
+
+/// Buttons dip when pressed, so a tap visibly lands.
+struct PressScale: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
@@ -194,8 +247,8 @@ private struct PickerRows: View {
                             .minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 9)
-                            .foregroundStyle(on ? Theme.background : Theme.text)
-                            .background(on ? tone : Theme.raised, in: RoundedRectangle(cornerRadius: 8))
+                            .foregroundStyle(on ? Theme.stripeDark : Theme.text)
+                            .background(on ? tone : Theme.well, in: RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? tone : Theme.border))
                     }
                     .buttonStyle(.plain)
@@ -292,38 +345,52 @@ private struct SectionView: View {
     }
 }
 
-/// Approving takes a deliberate drag all the way across, so a stray tap can't approve.
+/// Approving takes a deliberate drag all the way across, so a stray tap can't approve. Once
+/// the answer is accepted (`done`), the knob stays at the end and turns into a tick.
 struct SlideToApprove: View {
     let label: String
-    let tone: Color
     let busy: Bool
+    let done: Bool
     let action: () -> Void
     @State private var offset: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
-            let knob: CGFloat = 52
+            let knob: CGFloat = 44
             let travel = geo.size.width - knob - 8
+            let filled = done ? travel : offset
             ZStack(alignment: .leading) {
-                Capsule().fill(Theme.raised).overlay(Capsule().stroke(tone.opacity(0.6)))
+                Capsule().fill(Theme.approve.opacity(0.18)).overlay(Capsule().stroke(Theme.approve.opacity(0.7)))
+                Capsule().fill(Theme.approve).frame(width: filled + knob + 8)
                 Text(busy ? "Sending…" : "Slide to \(label.lowercased())")
-                    .font(.headline)
-                    .foregroundStyle(tone)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.approve)
                     .frame(maxWidth: .infinity)
                     .padding(.leading, knob)
-                Circle().fill(tone).frame(width: knob, height: knob)
-                    .overlay(Image(systemName: "chevron.right.2").font(.headline).foregroundStyle(Theme.background))
-                    .offset(x: 4 + offset)
+                    .opacity(done ? 0 : 1 - Double(offset / max(travel, 1)))
+                Circle().fill(.white).frame(width: knob, height: knob)
+                    .overlay(Image(systemName: done ? "checkmark" : "chevron.right.2")
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(Theme.approve)
+                        .contentTransition(.symbolEffect(.replace)))
+                    .offset(x: 4 + filled)
                     .gesture(DragGesture()
                         .onChanged { offset = min(max(0, $0.translation.width), travel) }
                         .onEnded { _ in
-                            if offset >= travel - 2 { action() }
-                            withAnimation(.spring) { offset = 0 }
+                            if offset >= travel - 2 {
+                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                                action()
+                            } else {
+                                withAnimation(.spring) { offset = 0 }
+                            }
                         })
             }
-            .opacity(busy ? 0.5 : 1)
-            .allowsHitTesting(!busy)
+            .animation(.spring(response: 0.3), value: done)
+            // A failed send slides the knob back.
+            .onChange(of: busy) { _, busy in if !busy && !done { withAnimation(.spring) { offset = 0 } } }
+            .opacity(busy ? 0.7 : 1)
+            .allowsHitTesting(!busy && !done)
         }
-        .frame(height: 60)
+        .frame(height: 52)
     }
 }

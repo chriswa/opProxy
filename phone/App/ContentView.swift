@@ -9,25 +9,63 @@ struct ContentView: View {
         Group {
             if !model.paired {
                 PairingView().safeAreaInset(edge: .bottom) { StatusBar() }
-            } else if let item = model.items.first {
-                // The oldest request, alone; answering it (here or on the Mac) brings up the next.
-                RequestView(item: item, waiting: model.items.count - 1).id(item.id)
             } else {
-                ContentUnavailableView {
-                    Label("No pending requests", systemImage: "checkmark.shield")
-                } description: {
-                    Text("When an agent asks for a 1Password secret, it shows up here.")
-                } actions: {
-                    Button("Pair with a Mac") { pairing = true }.foregroundStyle(Theme.dim)
-                }
-                .safeAreaInset(edge: .bottom) { StatusBar() }
-                .sheet(isPresented: $pairing) { PairingView() }
+                queue
             }
         }
         .foregroundStyle(Theme.text)
         .background(Theme.background)
         .preferredColorScheme(.dark)
         .tint(Theme.tone(nil))
+    }
+
+    /// The request on screen sits on top of whatever comes next. When it's answered or goes
+    /// away, it slides off and uncovers the next request, or the empty queue, underneath.
+    private var queue: some View {
+        ZStack {
+            empty.zIndex(-.infinity)
+            if let item = model.current {
+                RequestView(item: item, waiting: model.waiting)
+                    .id(item.id)
+                    // Older requests stack above newer ones, so the one leaving stays on top.
+                    .zIndex(-item.createdAt)
+                    .transition(.asymmetric(insertion: .identity,
+                                            removal: .move(edge: .top).combined(with: .opacity)))
+            }
+        }
+        .animation(.easeIn(duration: 0.35), value: model.current?.id)
+    }
+
+    private var empty: some View {
+        VStack(spacing: 0) {
+            CautionStripe(tone: Theme.tone(nil)).frame(height: 8).opacity(0.5)
+            ContentUnavailableView {
+                Label("No pending requests", systemImage: "checkmark.shield")
+            } description: {
+                Text("When an agent asks for a 1Password secret, it shows up here.")
+            } actions: {
+                Button("Pair with a Mac") { pairing = true }.buttonStyle(FilledButton())
+            }
+            StatusBar()
+        }
+        .background(Theme.background)
+        .sheet(isPresented: $pairing) { PairingView() }
+    }
+}
+
+/// The app's one filled button: hazard yellow with dark text.
+struct FilledButton: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .foregroundStyle(Theme.stripeDark)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 13)
+            .frame(minWidth: 200)
+            .background(Theme.tone(nil), in: Capsule())
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
 
