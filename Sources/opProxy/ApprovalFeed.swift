@@ -1,12 +1,47 @@
 import CryptoKit
-import Darwin
+
 import Foundation
 import OpProxyCore
 
-/// Publishes pending approvals on `Paths.approvalFeed` so the Spaceterm phone app can show
-/// and answer them (APPROVAL_FEED.md is the protocol). Spaceterm only relays, and anything
-/// running as you can connect here, so a reply counts only if a paired phone's key signed it,
-/// for a request and a document this feed actually published. All state lives on `queue`.
+/// One change to the feed's state, in the order consumers must apply them (APPROVAL_FEED.md).
+enum FeedMessage {
+    case hello(pairedKeys: [String])
+    case status([String: Any])
+    case upsert(id: String, item: [String: Any])
+    case remove(id: String, note: String)
+
+    /// The message as APPROVAL_FEED.md writes it.
+    var json: [String: Any] {
+        switch self {
+        case .hello(let keys): return ["type": "hello", "protocol": 1, "provider": "opProxy", "pairedKeys": keys]
+        case .status(let status): return ["type": "status", "status": status]
+        case .upsert(_, let item): return ["type": "upsert", "item": item]
+        case .remove(let id, let note): return ["type": "remove", "id": id, "note": note]
+        }
+    }
+}
+
+/// Everything a consumer that just connected needs, before any later `FeedMessage`.
+struct FeedState {
+    let pairedKeys: [String]
+    let status: [String: Any]?
+    /// Pending items, oldest first.
+    let items: [(id: String, item: [String: Any])]
+}
+
+/// Carries the feed to phones and their replies back. The feed calls `attach` once, then
+/// `send` for every change; both on the feed's queue, so a transport that reads
+/// `feed.state()` inside `attach` or `send` sees exactly the state that message produced.
+protocol FeedTransport: AnyObject {
+    func attach(_ feed: ApprovalFeed) throws
+    func send(_ message: FeedMessage)
+}
+
+/// Publishes pending approvals so a paired phone can show and answer them (APPROVAL_FEED.md
+/// is the protocol), over every transport it is given. Transports only relay, and anything
+/// running as you can reach at least one of them, so a reply counts only if a paired phone's
+/// key signed it, for a request and a document this feed actually published. All state lives
+/// on `queue`.
 final class ApprovalFeed {
     /// Offers a phone's decision; false if the request was already decided elsewhere.
     typealias Decide = (Decision) -> Bool
@@ -14,13 +49,11 @@ final class ApprovalFeed {
     /// or the reason it wasn't.
     typealias ConfirmPairing = (_ name: String, _ publicKey: Data, _ done: @escaping (String?) -> Void) -> Void
 
-    private let path: URL
     private let log: Log
     private let devices: PairedDeviceStore
     private let confirmPairing: ConfirmPairing
-    private let queue = DispatchQueue(label: "opProxy.feed")
-    private var clients: [Int: Int32] = [:]
-    private var nextClient = 0
+    let queue = DispatchQueue(label: "opProxy.feed")
+    private var transports: [FeedTransport] = []
     private var items: [String: Item] = [:]
     /// Notes for items no longer pending, so a late reply hears why.
     private var finished: [String: String] = [:]
@@ -52,29 +85,26 @@ final class ApprovalFeed {
         var documentHashes: Set<String> = []
     }
 
-    init(path: URL, log: Log, devices: PairedDeviceStore, confirmPairing: @escaping ConfirmPairing) {
-        self.path = path
+    init(log: Log, devices: PairedDeviceStore, confirmPairing: @escaping ConfirmPairing) {
         self.log = log
         self.devices = devices
         self.confirmPairing = confirmPairing
     }
 
-    func start() throws {
-        let listener = try UnixSocket.listen(path: path.path)
-        log.write("approval feed on \(path.path)")
-        queue.sync { announcedKeys = pairedKeys() }
-        Thread.detachNewThread { [self] in
-            while true {
-                let fd = accept(listener, nil, nil)
-                if fd < 0 { continue }
-                UnixSocket.noSigpipe(fd)
-                // A client that stops reading mustn't stall everyone else's updates.
-                var tv = timeval(tv_sec: 2, tv_usec: 0)
-                setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-                serve(fd)
+    /// Starts each transport that attaches; one that can't is logged and left out.
+    func start(_ transports: [FeedTransport]) {
+        queue.sync {
+            announcedKeys = pairedKeys()
+            for transport in transports {
+                do {
+                    try transport.attach(self)
+                    self.transports.append(transport)
+                } catch {
+                    log.write("approval feed: \(type(of: transport)) didn't start: \(error)")
+                }
             }
         }
-        // `opProxy unpair` edits the file from another process; tell clients when keys change.
+        // `opProxy unpair` edits the file from another process; tell consumers when keys change.
         // The authorization is polled here too, which also catches it passing the 12-hour cap.
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 5, repeating: 5)
@@ -84,6 +114,34 @@ final class ApprovalFeed {
         }
         timer.resume()
         keyWatch = timer
+    }
+
+    /// The feed as it stands; call on `queue`.
+    func state() -> FeedState {
+        dispatchPrecondition(condition: .onQueue(queue))
+        announceKeysIfChanged()
+        announceStatusIfChanged()
+        return FeedState(pairedKeys: announcedKeys, status: status?.json,
+                         items: items.values.sorted { $0.createdAt < $1.createdAt }.map { ($0.id, json($0)) })
+    }
+
+    /// A message from a consumer. `respond` gets the `reply-result` or `pair-result` to send
+    /// back, on `queue`; other messages get no response.
+    func receive(_ message: [String: Any], respond: @escaping ([String: Any]) -> Void) {
+        queue.async { [self] in
+            switch message["type"] as? String {
+            case "reply":
+                let error = handleReply(message)
+                if let error { log.write("phone reply refused: \(error)") }
+                var reply: [String: Any] = ["type": "reply-result", "id": message["id"] as? String ?? "", "ok": error == nil]
+                if let error { reply["error"] = error }
+                respond(reply)
+            case "pair":
+                handlePair(message, respond: respond)
+            default:
+                break
+            }
+        }
     }
 
     // MARK: Requests
@@ -111,7 +169,7 @@ final class ApprovalFeed {
                             createdAt: Date(), challenge: challenge.encoded, grants: grants, decide: decide)
             revise(&item)
             items[id] = item
-            broadcast(["type": "upsert", "item": json(item)])
+            broadcast(.upsert(id: item.id, item: json(item)))
         }
         return id
     }
@@ -122,7 +180,7 @@ final class ApprovalFeed {
             guard var item = items.values.first(where: { $0.key == key }) else { return }
             item.expiresAt = deadline
             items[item.id] = item
-            broadcast(["type": "upsert", "item": json(item)])
+            broadcast(.upsert(id: item.id, item: json(item)))
         }
     }
 
@@ -132,7 +190,7 @@ final class ApprovalFeed {
             item.abandoned = true
             revise(&item)
             items[item.id] = item
-            broadcast(["type": "upsert", "item": json(item)])
+            broadcast(.upsert(id: item.id, item: json(item)))
         }
     }
 
@@ -144,7 +202,7 @@ final class ApprovalFeed {
     private func finish(_ id: String, note: String) {
         guard items.removeValue(forKey: id) != nil else { return }
         finished[id] = note
-        broadcast(["type": "remove", "id": id, "note": note])
+        broadcast(.remove(id: id, note: note))
     }
 
     /// A new document revision; the item's earlier documents stay answerable.
@@ -204,11 +262,11 @@ final class ApprovalFeed {
 
     // MARK: Pairing
 
-    private func handlePair(_ message: [String: Any], client: Int) {
+    private func handlePair(_ message: [String: Any], respond: @escaping ([String: Any]) -> Void) {
         func result(_ keyId: String, _ error: String?) {
             var reply: [String: Any] = ["type": "pair-result", "keyId": keyId, "ok": error == nil]
             if let error { reply["error"] = error }
-            send(client, reply)
+            respond(reply)
         }
         guard let raw = (message["publicKey"] as? String).flatMap({ Data(base64Encoded: $0) }), raw.count == 64,
               (try? P256.Signing.PublicKey(rawRepresentation: raw)) != nil
@@ -232,20 +290,14 @@ final class ApprovalFeed {
 
     private func pairedKeys() -> [String] { devices.devices.map(\.keyId) }
 
-    private func hello() -> [String: Any] {
-        ["type": "hello", "protocol": 1, "provider": "opProxy", "pairedKeys": announcedKeys]
-    }
-
     private func announceKeysIfChanged() {
         let keys = pairedKeys()
         guard keys != announcedKeys else { return }
         announcedKeys = keys
-        broadcast(hello())
+        broadcast(.hello(pairedKeys: keys))
     }
 
     // MARK: Status
-
-    private func statusMessage(_ status: FeedStatus) -> [String: Any] { ["type": "status", "status": status.json] }
 
     private func announceStatusIfChanged() {
         guard let authStatus else { return }
@@ -255,60 +307,11 @@ final class ApprovalFeed {
         let next = FeedStatus(window, prompting: prompting, lostSince: lostSince, now: now)
         guard next != status else { return }
         status = next
-        broadcast(statusMessage(next))
+        broadcast(.status(next.json))
     }
 
-    // MARK: Connections
-
-    private func serve(_ fd: Int32) {
-        queue.async { [self] in
-            let client = nextClient
-            nextClient += 1
-            announceKeysIfChanged()
-            clients[client] = fd
-            send(client, hello())
-            announceStatusIfChanged()
-            if let status { send(client, statusMessage(status)) }
-            send(client, ["type": "snapshot", "items": items.values.sorted { $0.createdAt < $1.createdAt }.map(json)])
-            Thread.detachNewThread { [self] in
-                let reader = LineReader(fd: fd, limit: 1 << 20)
-                while let line = reader.next() {
-                    queue.async { [self] in handle(line, client: client) }
-                }
-                queue.async { [self] in
-                    clients.removeValue(forKey: client)
-                    close(fd)
-                }
-            }
-        }
-    }
-
-    private func handle(_ line: Data, client: Int) {
-        guard let message = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else { return }
-        switch message["type"] as? String {
-        case "reply":
-            let error = handleReply(message)
-            if let error { log.write("phone reply refused: \(error)") }
-            var reply: [String: Any] = ["type": "reply-result", "id": message["id"] as? String ?? "", "ok": error == nil]
-            if let error { reply["error"] = error }
-            send(client, reply)
-        case "pair":
-            handlePair(message, client: client)
-        default:
-            break
-        }
-    }
-
-    private func broadcast(_ message: [String: Any]) {
-        for client in clients.keys { send(client, message) }
-    }
-
-    /// A failed write drops the client; its reader then sees EOF and cleans up.
-    private func send(_ client: Int, _ message: [String: Any]) {
-        guard let fd = clients[client],
-              let data = try? JSONSerialization.data(withJSONObject: message, options: [.sortedKeys, .withoutEscapingSlashes])
-        else { return }
-        if !UnixSocket.writeAll(fd, data + Data("\n".utf8)) { shutdown(fd, SHUT_RDWR) }
+    private func broadcast(_ message: FeedMessage) {
+        for transport in transports { transport.send(message) }
     }
 
     private func json(_ item: Item) -> [String: Any] {

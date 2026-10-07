@@ -65,7 +65,7 @@ case "daemon":
     let signer = makeApprovalSigner(paths: paths)
     let devices = makePairedDeviceStore(paths: paths, signer: signer)
     // Every request is also published for paired phones; the first answer wins.
-    let feed = ApprovalFeed(path: paths.approvalFeed, log: log, devices: devices, confirmPairing:
+    let feed = ApprovalFeed(log: log, devices: devices, confirmPairing:
         Pairing.confirmer(devices: devices, signer: signer, autoPair: TestKnobs.value("OPPROXY_TEST_AUTO_PAIR") != nil))
     let approver = FanoutApprover(local: local, feed: feed)
     guard let executable = Bundle.main.executablePath else { fail("cannot find my own executable") }
@@ -79,7 +79,7 @@ case "daemon":
     auth.promptObserver = authContext
     do { try daemon.start() } catch { fail("could not start: \(error)") }
     feed.authStatus = { (auth.current, auth.isRefreshing) }
-    do { try feed.start() } catch { log.write("could not start the approval feed: \(error)") }
+    feed.start([FeedSocket(path: paths.approvalFeed, log: log)])
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let menuBar = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? MenuBarController(daemon: daemon) : nil

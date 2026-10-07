@@ -7,9 +7,11 @@ let testing: [SwiftSetting] = [.define("OPPROXY_TESTING", .when(configuration: .
 
 let package = Package(
     name: "opProxy",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v13), .iOS(.v17)],
+    products: [.library(name: "FeedProtocol", targets: ["FeedProtocol"])],
     targets: [
-        .target(name: "OpProxyCore", swiftSettings: testing),
+        .target(name: "FeedProtocol"),
+        .target(name: "OpProxyCore", dependencies: ["FeedProtocol"], swiftSettings: testing),
         .executableTarget(name: "opProxy", dependencies: ["OpProxyCore"], swiftSettings: testing),
         .testTarget(name: "OpProxyCoreTests", dependencies: ["OpProxyCore"], swiftSettings: testing),
     ]
