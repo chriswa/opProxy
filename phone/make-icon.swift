@@ -1,4 +1,4 @@
-// Draws the iPhone app's icon: a white key on opProxy's teal. Run: swift phone/make-icon.swift
+// Draws the iPhone app's icon: a hazard-yellow key over a stripe band, in the app's colours. Run: swift phone/make-icon.swift
 import AppKit
 
 let size: CGFloat = 1024
@@ -9,15 +9,32 @@ let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size), pixelsH
                            bytesPerRow: 0, bitsPerPixel: 0)!
 NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+// The app's caution palette (Theme.swift): warm near-black, hazard yellow, stripe black.
+let yellow = NSColor(srgbRed: 0.98, green: 0.80, blue: 0.08, alpha: 1)
+let black = NSColor(srgbRed: 0.07, green: 0.06, blue: 0.05, alpha: 1)
 // iOS rounds the corners itself, so the background fills the square.
-NSGradient(starting: NSColor(srgbRed: 0.10, green: 0.62, blue: 0.62, alpha: 1),
-           ending: NSColor(srgbRed: 0.03, green: 0.33, blue: 0.38, alpha: 1))!
-    .draw(in: NSRect(x: 0, y: 0, width: size, height: size), angle: -90)
-let config = NSImage.SymbolConfiguration(pointSize: 560, weight: .semibold)
-    .applying(.init(paletteColors: [.white]))
+NSColor(srgbRed: 0.12, green: 0.105, blue: 0.08, alpha: 1).setFill()
+NSRect(x: 0, y: 0, width: size, height: size).fill()
+// A band of hazard stripes along the bottom, like the stripe across the app's screens.
+let band: CGFloat = 150
+black.setFill()
+NSRect(x: 0, y: 0, width: size, height: band).fill()
+yellow.setFill()
+var x: CGFloat = -band
+while x < size {
+    let stripe = NSBezierPath()
+    stripe.move(to: NSPoint(x: x, y: 0))
+    stripe.line(to: NSPoint(x: x + 70, y: 0))
+    stripe.line(to: NSPoint(x: x + 70 + band, y: band))
+    stripe.line(to: NSPoint(x: x + band, y: band))
+    stripe.close()
+    stripe.fill()
+    x += 140
+}
+let config = NSImage.SymbolConfiguration(pointSize: 470, weight: .semibold).applying(.init(paletteColors: [yellow]))
 let key = NSImage(systemSymbolName: "key.horizontal.fill", accessibilityDescription: nil)!.withSymbolConfiguration(config)!
 let ctx = NSGraphicsContext.current!.cgContext
-ctx.translateBy(x: size / 2, y: size / 2)
+ctx.translateBy(x: size / 2, y: (size + band) / 2)
 ctx.rotate(by: .pi / 4)
 key.draw(in: NSRect(x: -key.size.width / 2, y: -key.size.height / 2, width: key.size.width, height: key.size.height))
 NSGraphicsContext.restoreGraphicsState()
