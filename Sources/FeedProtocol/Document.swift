@@ -38,6 +38,27 @@ public struct FeedDocument: Decodable, Equatable {
         public let id: String
         public let label: String
         public let hint: String?
+        /// The option as separate choices, in order (Allow, then For), for phones that
+        /// offer each as its own row. Options without one skip that row.
+        public let facets: [Facet]?
+    }
+
+    public struct Facet: Decodable, Equatable, Hashable {
+        public let name: String
+        public let value: String
+    }
+
+    /// Who is asking, for phones that lay it out themselves.
+    public struct Requester: Decodable, Equatable {
+        public let name: String
+        public let detail: String?
+        public let context: String?
+    }
+
+    /// What is being asked for.
+    public struct Subject: Decodable, Equatable {
+        public let title: String
+        public let detail: String?
     }
 
     public struct Picker: Decodable, Equatable, Hashable {
@@ -58,6 +79,8 @@ public struct FeedDocument: Decodable, Equatable {
     public let kicker: String?
     public let title: String
     public let subtitle: String?
+    public let requester: Requester?
+    public let item: Subject?
     public let sections: [Section]?
     public let notice: String?
     public let pickers: [Picker]?

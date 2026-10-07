@@ -51,7 +51,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 - **Who, then what, in the largest type.** First the agent's name, then the item as "Vault / Item". When the label command (below) names the agent, the name is that one ("Kevin"), with "Claude Code · in “fix flaky tests”" beneath; otherwise it's "Claude Code Agent" (or Codex, Cursor). Apps can reuse a name for another agent later, so the name appears only in live prompts (the dialog, the phone and the Touch ID reason) and is never saved with an approval; stored approvals keep only the title.
 - **Context comes next:** the fields asked for, the item and vault IDs, the `op` command as the agent wrote it, the agent's full shell command (recovered from the process tree), its most recent transcript message, then PIDs and the working directory.
 - **Only Touch ID approves.** The dialog embeds Apple's inline Touch ID glyph (`LAAuthenticationView`), so there's no separate system sheet.
-- **Deny, or wait for the countdown.** The Deny button shows the countdown; after 110 seconds the request is denied.
+- **Deny, or wait for the countdown.** The Deny button shows the countdown; after 5 minutes the request is denied.
 - **Guarded input.** The keyboard does nothing except ⌘C, and clicks are ignored for 500ms after the dialog appears.
 - **Agents that stop waiting.** If an agent gives up before you answer, the dialog says so. Approving still lets the agent's retry go through silently.
 

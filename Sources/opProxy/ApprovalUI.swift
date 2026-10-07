@@ -8,7 +8,7 @@ import OpProxyCore
 /// (LAAuthenticationView), so there's no system sheet and no button to click. Touch ID also
 /// authorizes signing the approval. Deny or the timeout denies.
 final class DialogApprover: LocalApprover {
-    static let timeout: TimeInterval = 110
+    static let timeout: TimeInterval = 300
 
     /// Requests waiting behind the one on screen; only one dialog is ever shown.
     private var queue: [(ApprovalPrompt, (Decision) -> Void)] = []

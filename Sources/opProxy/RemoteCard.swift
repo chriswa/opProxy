@@ -14,9 +14,13 @@ enum RemoteCard {
             "title": prompt.target.label,
             "subtitle": subtitle(prompt.requester),
             "sections": sections(prompt),
+            // `requester` and `item` say who is asking for what, for phones that lay it out
+            // themselves; `title` and `subtitle` say the same for those that don't.
+            "requester": requesterBlock(prompt.requester),
+            "item": ["title": prompt.target.title, "detail": "Vault: \(prompt.target.vaultName)"],
             "pickers": [[
                 "id": picker, "label": "Allow", "default": options[defaultIndex].id,
-                "options": options.map { ["id": $0.id, "label": $0.label, "hint": $0.hint] },
+                "options": options.map { ["id": $0.id, "label": $0.label, "hint": $0.hint, "facets": facets($0.scope)] },
             ]],
             "actions": [
                 ["id": "deny", "label": "Deny", "role": "deny"],
@@ -28,6 +32,32 @@ enum RemoteCard {
         if abandoned { doc["notice"] = abandonedNotice }
         let data = try! JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys, .withoutEscapingSlashes])
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// "Kevin", then "Claude Code · c7d70e94", then the label's title.
+    private static func requesterBlock(_ requester: Requester) -> [String: Any] {
+        var block: [String: Any] = ["name": requester.headline]
+        switch requester {
+        case .agent(let a):
+            // An unnamed agent's headline already says what kind it is.
+            let session = "session \(a.session.sessionId.prefix(8))"
+            block["detail"] = a.label?.name == nil ? "Session \(a.session.sessionId.prefix(8))" : "\(requester.kind) · \(session)"
+        case .terminal(let t):
+            block["detail"] = (["Terminal tab"] + [t.info.tty].compactMap { $0 }).joined(separator: " · ")
+        }
+        if let title = requester.labelTitle { block["context"] = "in “\(title)”" }
+        return block
+    }
+
+    /// The option split into the dialog's two choices, Allow then For, so a phone can offer
+    /// them as two rows. An option that stores nothing has no For.
+    private static func facets(_ scope: ApprovalScope) -> [[String: String]] {
+        switch scope {
+        case .once: return [["name": "Allow", "value": "Once"]]
+        case .tab: return [["name": "Allow", "value": "This Tab"]]
+        case .lasting(let lifetime, let reach):
+            return [["name": "Allow", "value": lifetime.label], ["name": "For", "value": reach.label]]
+        }
     }
 
     private static func subtitle(_ requester: Requester) -> String {
