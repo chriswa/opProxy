@@ -12,7 +12,10 @@ APP="$OPPROXY_HOME/opProxy.app"
 BIN="$APP/Contents/MacOS/opProxy"
 PIDFILE="$OPPROXY_HOME/daemon.pid"
 
-stop() { [ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null; rm -f "$PIDFILE" "$OPPROXY_HOME/daemon.sock"; }
+stop() {
+    if [ -f "$PIDFILE" ]; then kill "$(cat "$PIDFILE")" 2>/dev/null || true; fi
+    rm -f "$PIDFILE" "$OPPROXY_HOME/daemon.sock"
+}
 
 case "${1:-}" in
 start)
