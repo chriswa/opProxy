@@ -406,6 +406,11 @@ final class Daemon {
                 ?? .process(agent: identity.agent, instance: identity.agentInstance)
             return .agent(identity, session, audience)
         }
+        let lookalikes = ProcessTree.ancestry(of: peer).dropFirst().filter { AgentKind.matching($0) != nil }
+        if !lookalikes.isEmpty {
+            log.write("unverified agent process \(lookalikes.map { "\($0.name) \($0.pid)" }.joined(separator: ", ")); "
+                      + "treating the caller as a terminal")
+        }
         return TerminalKey.of(pid: peer).map(Caller.terminal)
     }
 

@@ -30,7 +30,7 @@ public enum AgentKind: String, Codable, CaseIterable {
         }
     }
 
-    static func matching(_ process: ProcessEntry) -> AgentKind? {
+    public static func matching(_ process: ProcessEntry) -> AgentKind? {
         allCases.first { !$0.processNames.isDisjoint(with: process.names) }
     }
 }

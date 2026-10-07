@@ -7,7 +7,7 @@ private func csops(_ pid: pid_t, _ ops: UInt32, _ useraddr: UnsafeMutableRawPoin
 /// Code-signature checks against the vendors' Team IDs. A same-user attacker can replace
 /// files but can't sign as 1Password, Anthropic or OpenAI.
 public enum CodeSignature {
-    public static let onePasswordCLI = #"anchor apple generic and identifier "com.1password.op" and certificate leaf[subject.OU] = "2BUA8C4S2C""#
+    public static let onePasswordCLI = SigningRequirement(identifier: "com.1password.op", team: "2BUA8C4S2C").text
 
     /// Whether the file at `path` (symlinks resolved) is validly signed and meets `requirement`.
     public static func file(_ path: String, satisfies requirement: String) -> Bool {
@@ -20,8 +20,14 @@ public enum CodeSignature {
         return SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSCheckAllArchitectures), req) == errSecSuccess
     }
 
-    /// Whether the running process `pid` is validly signed and meets `requirement`.
-    public static func process(_ pid: pid_t, satisfies requirement: String) -> Bool {
+    /// Whether the running process `pid` is validly signed and meets `requirement`. The
+    /// Security framework re-reads the executable from disk, so when an upgrade has deleted or
+    /// replaced it since the process started, the signature the kernel loaded decides.
+    public static func process(_ pid: pid_t, satisfies requirement: SigningRequirement) -> Bool {
+        processOnDisk(pid, satisfies: requirement.text) || KernelSignature.process(pid, satisfies: requirement)
+    }
+
+    private static func processOnDisk(_ pid: pid_t, satisfies requirement: String) -> Bool {
         var code: SecCode?
         var req: SecRequirement?
         let attributes = [kSecGuestAttributePid: pid] as CFDictionary

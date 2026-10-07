@@ -36,13 +36,13 @@ func instance(of process: ProcessEntry) -> String {
 }
 
 extension AgentKind {
-    /// Team IDs and identifiers of the vendors' signed binaries.
-    var signingRequirement: String {
+    /// Identifiers and Team IDs of the vendors' signed binaries.
+    var signingRequirement: SigningRequirement {
         switch self {
-        case .claude: return #"anchor apple generic and identifier "com.anthropic.claude-code" and certificate leaf[subject.OU] = "Q6L2SF6YDW""#
-        case .codex: return #"anchor apple generic and identifier "codex" and certificate leaf[subject.OU] = "2DC432GLL2""#
+        case .claude: return SigningRequirement(identifier: "com.anthropic.claude-code", team: "Q6L2SF6YDW")
+        case .codex: return SigningRequirement(identifier: "codex", team: "2DC432GLL2")
         // cursor-agent is a script that runs a Node.js-signed node; see `verify`.
-        case .cursor: return #"anchor apple generic and identifier "node" and certificate leaf[subject.OU] = "HX7739G8FX""#
+        case .cursor: return SigningRequirement(identifier: "node", team: "HX7739G8FX")
         }
     }
 
