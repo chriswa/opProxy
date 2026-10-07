@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: FeedModel
-    @State private var pairing = false
 
     var body: some View {
         Group {
@@ -39,17 +38,11 @@ struct ContentView: View {
     private var empty: some View {
         VStack(spacing: 0) {
             CautionStripe(tone: Theme.tone(nil)).frame(height: 8).opacity(0.5)
-            ContentUnavailableView {
-                Label("No pending requests", systemImage: "checkmark.shield")
-            } description: {
-                Text("When an agent asks for a secret, it shows up here.")
-            } actions: {
-                Button("Pair with a Mac") { pairing = true }.buttonStyle(FilledButton())
-            }
+            ContentUnavailableView("No pending requests", systemImage: "checkmark.shield",
+                                   description: Text("When an agent asks for a secret, it shows up here."))
             StatusBar()
         }
         .background(Theme.background)
-        .sheet(isPresented: $pairing) { PairingView() }
     }
 }
 

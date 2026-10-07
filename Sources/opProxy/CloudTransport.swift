@@ -46,6 +46,8 @@ final class CloudTransport: FeedTransport {
     private var poked = false
     /// Pairing waits for a phone; poll the inbox quickly meanwhile.
     var pairingUntil = Date.distantPast
+    /// Gets each `pair-result` the Mac answers a phone with, so pairing can say how it went.
+    var onPairResult: (([String: Any]) -> Void)?
 
     /// What the zones should hold. Record name → JSON string; removed items keep their note
     /// for a while so a phone can say why one disappeared.
@@ -211,6 +213,7 @@ final class CloudTransport: FeedTransport {
         else { return }
         if message["type"] as? String == "pair" { pairingUntil = max(pairingUntil, Date() + 120) }
         feed.receive(message) { [self] response in
+            if response["type"] as? String == "pair-result" { onPairResult?(response) }
             record.encryptedValues[CloudFeed.Inbox.response] = Self.string(response)
             Task {
                 do {

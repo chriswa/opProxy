@@ -258,7 +258,7 @@ final class FeedModel: ObservableObject {
             }
             trace("hello written at \(helloWrittenAt.map { "\($0)" } ?? "never"); waited \(Self.seconds(since: started))")
             guard (helloWrittenAt ?? .distantPast) > started else { return "The Mac didn't join. Is its pairing window still open?" }
-            if paired { return nil }
+            // Sent even when already paired: the Mac answers at once, and its window closes.
 
             progress("Confirm on the Mac: check it shows \(PhoneKey.fingerprint), then use Touch ID.")
             if let error = await send(FeedReply.pair(publicKey: PhoneKey.publicKey, name: UIDevice.current.name)) { return error }

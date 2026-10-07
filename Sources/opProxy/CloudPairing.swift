@@ -38,9 +38,26 @@ final class CloudPairing {
             log.write("phone pairing: \(outcome)")
             await MainActor.run { [self] in
                 if outcome.hasPrefix("linked") {
-                    window?.finish("Joined. Confirm the phone's fingerprint on the next prompt.")
+                    window?.finish("Joined. Waiting for the phone to ask to be trusted…")
+                    awaitPairResult()
                 } else if outcome != "cancelled" {
                     window?.finish("Pairing didn't finish: \(outcome)")
+                }
+            }
+        }
+    }
+
+    /// The phone's `pair` message comes next; once the Mac has answered it, say so and close.
+    private func awaitPairResult() {
+        transport.onPairResult = { [weak self] response in
+            DispatchQueue.main.async {
+                guard let self, let window = self.window else { return }
+                self.transport.onPairResult = nil
+                if response["ok"] as? Bool == true {
+                    window.finish("Paired. Requests will now reach the phone.")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { window.close() }
+                } else {
+                    window.finish("Pairing didn't finish: \(response["error"] as? String ?? "the Mac refused it")")
                 }
             }
         }
@@ -145,6 +162,8 @@ private final class QRWindow: NSObject, NSWindowDelegate {
     func finish(_ message: String) {
         caption.stringValue = message
     }
+
+    func close() { panel.close() }
 
     func windowWillClose(_ notification: Notification) { onClose() }
 
