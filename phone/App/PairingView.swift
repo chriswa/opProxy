@@ -3,7 +3,6 @@ import SwiftUI
 
 struct PairingView: View {
     @EnvironmentObject private var model: FeedModel
-    @Environment(\.dismiss) private var dismiss
     @State private var scanning = false
     @State private var pasting = false
     @State private var pasted = ""
@@ -16,43 +15,11 @@ struct PairingView: View {
             CautionStripe(tone: Theme.tone(nil)).frame(height: 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    Text("Pair with your Mac").font(.largeTitle.weight(.bold))
-                    Text("Pair this phone with the Mac that asks for secrets, so its requests come here.")
-                        .foregroundStyle(Theme.dim)
-                    Button {
-                        scanning = true
-                    } label: {
-                        Label("Scan the Mac's code", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
+                    if busy {
+                        pairing
+                    } else {
+                        start
                     }
-                    .buttonStyle(FilledButton())
-                    .disabled(busy)
-
-                    if let progress {
-                        HStack(spacing: 10) { ProgressView().tint(Theme.text); Text(progress) }
-                    }
-                    if let error {
-                        Text(error).foregroundStyle(Theme.danger)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("This phone's fingerprint").font(.subheadline).foregroundStyle(Theme.dim)
-                        Text(PhoneKey.fingerprint).font(.title3.monospaced().weight(.semibold))
-                        Text("The Mac shows the same one when it asks you to confirm.").font(.footnote).foregroundStyle(Theme.dim)
-                    }
-
-                    DisclosureGroup("Paste a code instead", isExpanded: $pasting) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            TextField("Pairing code", text: $pasted)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled()
-                                .font(.body.monospaced())
-                                .padding(10)
-                                .background(Theme.well, in: RoundedRectangle(cornerRadius: 8))
-                            Button("Pair") { pair(pasted) }.buttonStyle(FilledButton()).disabled(busy || pasted.isEmpty)
-                        }
-                        .padding(.top, 8)
-                    }
-                    .foregroundStyle(Theme.dim)
                 }
                 .padding(20)
             }
@@ -64,6 +31,54 @@ struct PairingView: View {
         }
     }
 
+    /// Before pairing, or after it failed: how to start.
+    @ViewBuilder private var start: some View {
+        Text("Pair with your Mac").font(.largeTitle.weight(.bold))
+        Text("Pair this phone with the Mac that asks for secrets, so its requests come here.")
+            .foregroundStyle(Theme.dim)
+        if let error {
+            Text(error).foregroundStyle(Theme.danger)
+        }
+        Button {
+            scanning = true
+        } label: {
+            Label("Scan the Mac's code", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
+        }
+        .buttonStyle(FilledButton())
+        fingerprint
+        DisclosureGroup("Paste a code instead", isExpanded: $pasting) {
+            VStack(alignment: .leading, spacing: 10) {
+                TextField("Pairing code", text: $pasted)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.body.monospaced())
+                    .padding(10)
+                    .background(Theme.well, in: RoundedRectangle(cornerRadius: 8))
+                Button("Pair") { pair(pasted) }.buttonStyle(FilledButton()).disabled(pasted.isEmpty)
+            }
+            .padding(.top, 8)
+        }
+        .foregroundStyle(Theme.dim)
+    }
+
+    /// While pairing: only the step it's on, and the fingerprint the Mac will ask about.
+    @ViewBuilder private var pairing: some View {
+        Text("Pairing…").font(.largeTitle.weight(.bold))
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            ProgressView().tint(Theme.text)
+            Text(progress ?? "Starting…").font(.title3).fixedSize(horizontal: false, vertical: true)
+        }
+        fingerprint
+    }
+
+    private var fingerprint: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("This phone's fingerprint").font(.subheadline).foregroundStyle(Theme.dim)
+            Text(PhoneKey.fingerprint).font(.title3.monospaced().weight(.semibold))
+            Text("The Mac shows the same one when it asks you to confirm.").font(.footnote).foregroundStyle(Theme.dim)
+        }
+    }
+
     private func pair(_ payload: String) {
         busy = true
         error = nil
@@ -72,8 +87,6 @@ struct PairingView: View {
             progress = nil
             error = failure
             busy = false
-            // Opened from the empty queue to pair again: done here.
-            if failure == nil { dismiss() }
         }
     }
 }

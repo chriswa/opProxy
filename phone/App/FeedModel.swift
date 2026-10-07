@@ -269,7 +269,7 @@ final class FeedModel: ObservableObject {
             guard (helloWrittenAt ?? .distantPast) > started else { return "The Mac didn't join. Is its pairing window still open?" }
             // Sent even when already paired: the Mac answers at once, and its window closes.
 
-            progress("Confirm on the Mac: check it shows \(PhoneKey.fingerprint), then use Touch ID.")
+            progress("Confirm on the Mac: check it shows the fingerprint below, then use Touch ID.")
             if let error = await send(FeedReply.pair(publicKey: PhoneKey.publicKey, name: UIDevice.current.name)) { return error }
             token = nil
             await refresh()

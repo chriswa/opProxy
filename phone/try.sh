@@ -3,7 +3,7 @@
 # own state in ~/.opProxy-try, its own menu bar icon, and a stub `op` (no 1Password).
 #   phone/try.sh start     build, sign and start the test daemon; install the app if the iPhone is reachable
 #   phone/try.sh pair      open the test daemon's pairing QR code
-#   phone/try.sh request   a fake Claude Code agent asks for a secret
+#   phone/try.sh request [session]   a fake Claude Code agent asks for a secret; another session queues another
 #   phone/try.sh stop
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -68,7 +68,8 @@ request)
     FAKE="$OPPROXY_HOME/fake-agent"
     printf '%s\n' 'export CLAUDE_CODE_SESSION_ID=$2' 'shift 2' '/bin/bash -c '"'"'"$@"'"'"' tool-shell "$@"' > "$FAKE"
     ln -sf "$BIN" "$OPPROXY_HOME/op"
-    (exec -a opproxy-fake-agent /bin/bash "$FAKE" try-session try-session "$OPPROXY_HOME/op" read "op://Private/GitHub token/credential")
+    SESSION=${2:-try-session}
+    (exec -a opproxy-fake-agent /bin/bash "$FAKE" "$SESSION" "$SESSION" "$OPPROXY_HOME/op" read "op://Private/GitHub token/credential")
     ;;
 stop) stop ;;
 *) sed -n 4,6p "$0"; exit 1 ;;
