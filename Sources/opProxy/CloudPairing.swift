@@ -49,6 +49,7 @@ final class CloudPairing {
     private func pair() async throws -> String {
         // The phone shares its zone with this iCloud user alone.
         let me = try await container.userRecordID().recordName
+        log.write("phone pairing: showing the code for iCloud user \(me.prefix(10))")
         let code = CloudFeed.Rendezvous.newCode()
         let payload = CloudFeed.Rendezvous.qrPayload(code: code, macUser: me)
         await MainActor.run { [self] in
@@ -61,13 +62,25 @@ final class CloudPairing {
             }
         }
         let id = CKRecord.ID(recordName: CloudFeed.Rendezvous.recordName(code: code))
-        let deadline = Date() + 600
+        let started = Date()
+        let deadline = started + 600
+        var lastError = ""
         while Date() < deadline {
             try Task.checkCancellation()
-            if let record = try? await container.publicCloudDatabase.record(for: id),
-               let sealed = record[CloudFeed.Rendezvous.sealed] as? Data {
-                guard let invitation = CloudFeed.Rendezvous.open(sealed, code: code) else { return "the phone's reply didn't open" }
+            do {
+                let record = try await container.publicCloudDatabase.record(for: id)
+                guard let sealed = record[CloudFeed.Rendezvous.sealed] as? Data,
+                      let invitation = CloudFeed.Rendezvous.open(sealed, code: code) else { return "the phone's reply didn't open" }
+                log.write("phone pairing: found the phone's invitation after \(Int(Date().timeIntervalSince(started)))s "
+                          + "(written \(record.creationDate.map { "\(Int(Date().timeIntervalSince($0)))s ago" } ?? "at an unknown time"))")
                 return try await join(invitation)
+            } catch let error as CKError where error.code == .unknownItem {
+                // Not written yet.
+            } catch {
+                // Anything else is worth seeing, once per kind.
+                let text = "\(error)"
+                if text != lastError { log.write("phone pairing: reading the public database: \(text)") }
+                lastError = text
             }
             try await Task.sleep(nanoseconds: 2_000_000_000)
         }
@@ -80,10 +93,17 @@ final class CloudPairing {
             transport.link(CloudLink(zoneName: name, ownerName: CKCurrentUserDefaultName, shared: false, linkedAt: Date()))
             return "linked: own zone"
         case .share(let url):
+            let fetching = Date()
             let metadata = try await container.shareMetadata(for: url)
+            log.write("phone pairing: share metadata in \(String(format: "%.1f", Date().timeIntervalSince(fetching)))s: "
+                      + "public \(metadata.share.publicPermission.rawValue), my role \(metadata.participantRole.rawValue), "
+                      + "status \(metadata.participantStatus.rawValue), participants "
+                      + metadata.share.participants.map { "\($0.role.rawValue)/\($0.acceptanceStatus.rawValue)/\($0.userIdentity.userRecordID?.recordName.prefix(10) ?? "?")" }.joined(separator: ", "))
             // Joining through an open link would mean anyone holding it could too.
             guard metadata.share.publicPermission == .none else { return "refused: the phone's share is open to anyone with its link" }
+            let accepting = Date()
             _ = try await container.accept(metadata)
+            log.write("phone pairing: accepted in \(String(format: "%.1f", Date().timeIntervalSince(accepting)))s")
             let zoneID = metadata.share.recordID.zoneID
             transport.link(CloudLink(zoneName: zoneID.zoneName, ownerName: zoneID.ownerName, shared: true, linkedAt: Date()))
             return "linked: invited to a private share with \(metadata.share.participants.count) participants"

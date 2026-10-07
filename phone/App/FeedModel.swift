@@ -240,11 +240,14 @@ final class FeedModel: ObservableObject {
         defer { Task { [db = container.publicCloudDatabase] in _ = try? await db.deleteRecord(withID: rendezvousID) } }
         do {
             progress("Inviting the Mac's iCloud account…")
+            let inviting = Date()
             let invitation = try await invite(macUser)
+            trace("invited in \(Self.seconds(since: inviting))")
             let started = Date()
             let rendezvous = CKRecord(recordType: CloudFeed.Rendezvous.type, recordID: rendezvousID)
             rendezvous[CloudFeed.Rendezvous.sealed] = try CloudFeed.Rendezvous.seal(invitation, code: code)
             _ = try await container.publicCloudDatabase.save(rendezvous)
+            trace("wrote the rendezvous in \(Self.seconds(since: started))")
 
             // The Mac rewrites its `hello` once it has joined; an older one doesn't count.
             progress("Waiting for the Mac to join…")
@@ -253,6 +256,7 @@ final class FeedModel: ObservableObject {
                 token = nil
                 await refresh()
             }
+            trace("hello written at \(helloWrittenAt.map { "\($0)" } ?? "never"); waited \(Self.seconds(since: started))")
             guard (helloWrittenAt ?? .distantPast) > started else { return "The Mac didn't join. Is its pairing window still open?" }
             if paired { return nil }
 
@@ -272,6 +276,7 @@ final class FeedModel: ObservableObject {
     private func invite(_ macUser: String) async throws -> CloudFeed.Rendezvous.Invitation {
         let id = CKRecord.ID(recordName: CKRecordNameZoneWideShare, zoneID: zoneID)
         let existing = try? await db.record(for: id) as? CKShare
+        trace("share: \(existing.map { Self.describe($0) } ?? "none"); Mac is \(macUser.prefix(10))")
         if macUser == (try await container.userRecordID().recordName) {
             // Same Apple ID: the Mac reads this zone directly, so a share would only be exposure.
             if existing != nil { _ = try await db.deleteRecord(withID: id) }
@@ -293,6 +298,25 @@ final class FeedModel: ObservableObject {
             share.addParticipant(mac)
         }
         guard let saved = try await db.save(share) as? CKShare, let url = saved.url else { throw CKError(.internalError) }
+        trace("saved share: \(Self.describe(saved))")
         return .share(url)
+    }
+
+    // MARK: Diagnostics
+
+    /// Pairing steps with times, for the device console.
+    private func trace(_ message: String) {
+        print("opProxy pairing \(Date().formatted(date: .omitted, time: .standard)): \(message)")
+    }
+
+    private static func seconds(since start: Date) -> String {
+        String(format: "%.1fs", Date().timeIntervalSince(start))
+    }
+
+    private static func describe(_ share: CKShare) -> String {
+        "public \(share.publicPermission.rawValue), participants "
+            + share.participants.map {
+                "role \($0.role.rawValue) status \($0.acceptanceStatus.rawValue) user \($0.userIdentity.userRecordID?.recordName.prefix(10) ?? "?")"
+            }.joined(separator: "; ")
     }
 }

@@ -160,6 +160,7 @@ final class CloudTransport: FeedTransport {
         }
         guard !save.isEmpty || !delete.isEmpty else { return }
         let (saved, deleted) = try await db.modifyRecords(saving: save, deleting: delete, savePolicy: .allKeys, atomically: false)
+        if full { log.write("cloud feed: \(link.zoneName) of \(link.ownerName.prefix(10)): wrote \(save.count), deleted \(delete.count)") }
         for case (let id, .failure(let error)) in saved { throw Failure.record(id.recordName, error) }
         for case (let id, .failure(let error)) in deleted where (error as? CKError)?.code != .unknownItem {
             throw Failure.record(id.recordName, error)
