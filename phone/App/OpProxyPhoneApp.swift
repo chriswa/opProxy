@@ -11,17 +11,8 @@ struct OpProxyPhoneApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
-                .task {
-                    delegate.model = model
-                    await model.refresh()
-                }
-                // Poll while open: CloudKit only pushes new requests, not their removal.
-                .task(id: phase) {
-                    while phase == .active {
-                        await model.refresh()
-                        try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    }
-                }
+                .onAppear { delegate.model = model }
+                .onChange(of: phase, initial: true) { _, phase in model.setActive(phase == .active) }
         }
     }
 }

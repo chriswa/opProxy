@@ -31,6 +31,32 @@ final class FeedModel: ObservableObject {
     private var ready = false
     private var subscribed = false
     private var refreshing = false
+    private var poller: Task<Void, Never>?
+
+    // MARK: Polling
+
+    /// Polls every 2 seconds while the app is in the foreground: CloudKit only pushes new
+    /// requests, not their removal or status changes. The model owns the loop, so nothing a
+    /// view does can cancel a request in flight.
+    func setActive(_ active: Bool) {
+        guard active != (poller != nil) else { return }
+        if active {
+            poller = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.refresh()
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+            }
+        } else {
+            poller?.cancel()
+            poller = nil
+        }
+    }
+
+    /// Publishes only real changes, since each one redraws every view that watches the model.
+    private func update<Value: Equatable>(_ path: ReferenceWritableKeyPath<FeedModel, Value>, _ value: Value) {
+        if self[keyPath: path] != value { self[keyPath: path] = value }
+    }
 
     // MARK: Setup
 
@@ -47,11 +73,11 @@ final class FeedModel: ObservableObject {
                 _ = try await db.modifySubscriptions(saving: [Self.subscription(zoneID)], deleting: [])
                 subscribed = true
             }
-            lastError = nil
+            update(\.lastError, nil)
         } catch let error as CKError where ready && error.code == .unknownItem {
             // No request has been written yet; try again later.
         } catch {
-            lastError = Self.describe(error)
+            report(error, in: "setUp")
         }
     }
 
@@ -67,6 +93,13 @@ final class FeedModel: ObservableObject {
         info.category = "request"
         subscription.notificationInfo = info
         return subscription
+    }
+
+    /// Shows a failure, unless it was only cancelled: a newer refresh is already on its way.
+    private func report(_ error: Error, in step: String) {
+        print("opProxy \(step): \(error)")
+        if error is CancellationError || (error as? CKError)?.code == .operationCancelled { return }
+        update(\.lastError, Self.describe(error))
     }
 
     /// What to tell someone about a CloudKit failure.
@@ -93,17 +126,18 @@ final class FeedModel: ObservableObject {
                 let changes = try await db.recordZoneChanges(inZoneWith: zoneID, since: token)
                 for case (_, .success(let change)) in changes.modificationResultsByID { apply(change.record) }
                 for deletion in changes.deletions {
-                    items.removeAll { $0.id == deletion.recordID.recordName }
-                    removed[deletion.recordID.recordName] = nil
+                    let id = deletion.recordID.recordName
+                    update(\.items, items.filter { $0.id != id })
+                    update(\.removed, removed.filter { $0.key != id })
                 }
                 token = changes.changeToken
                 more = changes.moreComing
             }
-            lastError = nil
+            update(\.lastError, nil)
         } catch let error as CKError where error.code == .changeTokenExpired {
             token = nil
         } catch {
-            lastError = Self.describe(error)
+            report(error, in: "refresh")
         }
     }
 
@@ -111,22 +145,25 @@ final class FeedModel: ObservableObject {
         switch record.recordType {
         case CloudFeed.Item.type:
             guard let json = record.encryptedValues[CloudFeed.Item.item] as? String, let item = FeedItem.parse(json) else { return }
-            items.removeAll { $0.id == item.id }
+            var pending = items.filter { $0.id != item.id }
             if let note = record.encryptedValues[CloudFeed.Item.note] as? String {
-                removed[item.id] = Removed(item: item, note: note)
+                var gone = removed
+                gone[item.id] = Removed(item: item, note: note)
+                update(\.removed, gone)
                 clearNotification(item.id)
             } else {
-                items.append(item)
-                items.sort { $0.createdAt < $1.createdAt }
+                pending.append(item)
+                pending.sort { $0.createdAt < $1.createdAt }
             }
+            update(\.items, pending)
         case CloudFeed.State.type:
             guard let json = record.encryptedValues[CloudFeed.State.message] as? String,
                   let message = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return }
             if record.recordID.recordName == CloudFeed.State.hello {
-                pairedKeys = message["pairedKeys"] as? [String] ?? []
+                update(\.pairedKeys, message["pairedKeys"] as? [String] ?? [])
             } else if let status = message["status"],
                       let data = try? JSONSerialization.data(withJSONObject: status) {
-                self.status = try? JSONDecoder().decode(FeedProviderStatus.self, from: data)
+                update(\.status, try? JSONDecoder().decode(FeedProviderStatus.self, from: data))
             }
         default:
             break
