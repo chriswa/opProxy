@@ -50,8 +50,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             self?.render()
         }
         // Minute resolution is all the label shows.
-        timer = Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in self?.render() }
-        render()
+        tick()
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -238,6 +237,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func revoke(_ sender: NSMenuItem) {
         guard let action = sender.representedObject as? Action else { return }
         daemon.revoke(action.revocation)
+    }
+
+    /// Redraws every 20 seconds, and every second near the end so it counts down in seconds.
+    private func tick() {
+        render()
+        let remaining = daemon.auth.current.remaining(at: Date()) ?? .infinity
+        timer = Timer.scheduledTimer(withTimeInterval: remaining < 90 ? 1 : 20, repeats: false) { [weak self] _ in self?.tick() }
     }
 
     private func render() {

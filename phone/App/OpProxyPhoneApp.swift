@@ -35,9 +35,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return [.banner, .sound, .list]
     }
 
+    /// Requests are answered oldest first, so a tapped notification just opens the queue.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        let id = response.notification.request.content.userInfo["itemId"] as? String
-        await MainActor.run { model?.focus = id }
         await model?.refresh()
     }
 }

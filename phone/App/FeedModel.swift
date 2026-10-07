@@ -8,19 +8,11 @@ import UIKit
 /// replies into its inbox (CloudFeed in FeedProtocol).
 @MainActor
 final class FeedModel: ObservableObject {
-    struct Removed: Equatable {
-        let item: FeedItem
-        let note: String
-    }
-
     @Published private(set) var items: [FeedItem] = []
-    @Published private(set) var removed: [String: Removed] = [:]
     @Published private(set) var status: FeedProviderStatus?
     /// The Mac's paired keys, from its `hello`; nil until the Mac has joined the zone.
     @Published private(set) var pairedKeys: [String]?
     @Published private(set) var lastError: String?
-    /// A request to open, from a tapped notification.
-    @Published var focus: String?
 
     var paired: Bool { pairedKeys?.contains(PhoneKey.keyId) == true }
 
@@ -128,7 +120,6 @@ final class FeedModel: ObservableObject {
                 for deletion in changes.deletions {
                     let id = deletion.recordID.recordName
                     update(\.items, items.filter { $0.id != id })
-                    update(\.removed, removed.filter { $0.key != id })
                 }
                 token = changes.changeToken
                 more = changes.moreComing
@@ -146,10 +137,8 @@ final class FeedModel: ObservableObject {
         case CloudFeed.Item.type:
             guard let json = record.encryptedValues[CloudFeed.Item.item] as? String, let item = FeedItem.parse(json) else { return }
             var pending = items.filter { $0.id != item.id }
-            if let note = record.encryptedValues[CloudFeed.Item.note] as? String {
-                var gone = removed
-                gone[item.id] = Removed(item: item, note: note)
-                update(\.removed, gone)
+            if record.encryptedValues[CloudFeed.Item.note] != nil {
+                // Answered or timed out: its notification goes too.
                 clearNotification(item.id)
             } else {
                 pending.append(item)

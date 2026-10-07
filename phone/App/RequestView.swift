@@ -1,21 +1,21 @@
 import FeedProtocol
 import SwiftUI
 
-/// One request, as its document describes it, with the choices it offers.
+/// One request, as its document describes it, with the choices it offers. Give each
+/// request its own view identity, so a choice made on one never carries over to the next.
 struct RequestView: View {
     @EnvironmentObject private var model: FeedModel
-    let id: String
+    let item: FeedItem
     @State private var picks: [String: String] = [:]
     @State private var sending = false
     @State private var error: String?
-    @State private var answered: String?
 
     var body: some View {
-        if let item = model.items.first(where: { $0.id == id }), let doc = item.parsed {
+        if let doc = item.parsed {
             content(item, doc)
         } else {
-            ContentUnavailableView(model.removed[id]?.note ?? "No longer pending", systemImage: "checkmark.circle",
-                                   description: Text(answered ?? model.removed[id]?.item.parsed?.title ?? ""))
+            ContentUnavailableView("Unreadable request", systemImage: "exclamationmark.triangle",
+                                   description: Text("This app is too old to show it. Answer it on the Mac."))
         }
     }
 
@@ -45,7 +45,6 @@ struct RequestView: View {
             }
             .padding()
         }
-        .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             for picker in doc.pickers ?? [] where picks[picker.id] == nil {
                 picks[picker.id] = picker.default ?? picker.options.first?.id
@@ -101,8 +100,9 @@ struct RequestView: View {
         error = nil
         Task {
             let failure = await model.answer(item, action: action, picks: action == "approve" ? picks : [:])
+            // Once accepted, the request leaves the queue and the next one takes its place.
             sending = false
-            if let failure { error = failure } else { answered = action == "approve" ? "Approved" : "Denied" }
+            error = failure
         }
     }
 

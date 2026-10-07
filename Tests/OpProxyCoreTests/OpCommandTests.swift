@@ -417,12 +417,14 @@ final class AuthWindowTests: XCTestCase {
     }
 
     func testLabels() {
-        XCTAssertEqual(Duration.short(29), "<1m")
-        XCTAssertEqual(Duration.short(30), "1m")
+        XCTAssertEqual(Duration.short(-3), "0s")
+        XCTAssertEqual(Duration.short(29.4), "29s")
+        XCTAssertEqual(Duration.short(59.7), "59s")
+        XCTAssertEqual(Duration.short(60), "1m")
         XCTAssertEqual(Duration.short(32 * 60 + 29), "32m")
         XCTAssertEqual(Duration.short(32 * 60 + 30), "33m")
-        XCTAssertEqual(Duration.short(59 * 60 + 29), "59m")
-        XCTAssertEqual(Duration.short(59 * 60 + 30), "1h")
+        XCTAssertEqual(Duration.short(59 * 60 + 50), "59m")
+        XCTAssertEqual(Duration.short(3600), "1h")
         XCTAssertEqual(Duration.short(11 * 3600 + 57 * 60), "12h")
         XCTAssertEqual(Duration.short(11 * 3600 + 30 * 60), "12h")
         XCTAssertEqual(Duration.short(11 * 3600 + 29 * 60), "11h")

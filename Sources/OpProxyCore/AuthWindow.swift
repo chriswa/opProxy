@@ -23,15 +23,7 @@ public struct AuthWindow: Codable, Equatable {
     }
 }
 
-public enum Duration {
-    /// Menu bar label, rounded to the nearest unit: "12h" from 11h 30m up, minutes below
-    /// 59m 30s, "<1m" under 30 seconds.
-    public static func short(_ seconds: TimeInterval) -> String {
-        if seconds < 30 { return "<1m" }
-        if seconds < 59.5 * 60 { return "\(Int((seconds / 60).rounded()))m" }
-        return "\(Int((seconds / 3600).rounded()))h"
-    }
-
+extension Duration {
     /// Menu text: "11h 32m", "32m", "<1m".
     public static func long(_ seconds: TimeInterval) -> String {
         if seconds < 60 { return "<1m" }
