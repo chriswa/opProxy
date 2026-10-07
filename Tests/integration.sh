@@ -12,6 +12,11 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/opp.XXXXXX")
 export OPPROXY_HOME="$WORK/state"
 export OPPROXY_REAL_OP="$WORK/real-op"
 mkdir -p "$WORK/bin" "$OPPROXY_HOME"
+# Run the same inside an agent or a Spaceterm surface as anywhere else: tests that want a
+# session or a surface set these themselves, and the daemon never reaches the real Spaceterm.
+unset SPACETERM_NODE_ID SPACETERM_SURFACE_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID \
+    CURSOR_CONVERSATION_ID CURSOR_AGENT_CHAT_ID
+export SPACETERM_HOME="$WORK/no-spaceterm"
 ln -s "$BIN" "$WORK/bin/op"
 OP="$WORK/bin/op"
 LOG="$OPPROXY_HOME/daemon.log"
