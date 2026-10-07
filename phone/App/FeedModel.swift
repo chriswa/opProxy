@@ -11,8 +11,14 @@ import UIKit
 final class FeedModel: ObservableObject {
     @Published private(set) var items: [FeedItem] = []
     @Published private(set) var status: FeedProviderStatus?
-    /// The Mac's paired keys, from its `hello`; nil until the Mac has joined the zone.
-    @Published private(set) var pairedKeys: [String]?
+    /// The Mac's paired keys, from its `hello`; nil until the Mac has joined the zone. Kept
+    /// on the phone too, so the app opens on the right screen before iCloud answers.
+    @Published private(set) var pairedKeys: [String]? = UserDefaults.standard.stringArray(forKey: FeedModel.pairedKeysDefault) {
+        didSet { UserDefaults.standard.set(pairedKeys, forKey: Self.pairedKeysDefault) }
+    }
+    /// Whether the first fetch from iCloud has finished, so `paired` is more than a guess.
+    @Published private(set) var loaded = false
+    private static let pairedKeysDefault = "pairedKeys"
     @Published private(set) var lastError: String?
 
     /// A request the screen keeps showing while it acknowledges an answer, after it has left
@@ -130,7 +136,10 @@ final class FeedModel: ObservableObject {
     func refresh() async {
         guard !refreshing else { return }
         refreshing = true
-        defer { refreshing = false }
+        defer {
+            refreshing = false
+            update(\.loaded, true)
+        }
         await setUp()
         guard ready else { return }
         do {

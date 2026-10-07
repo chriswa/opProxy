@@ -6,10 +6,13 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if !model.paired {
+            if model.paired {
+                queue
+            } else if model.loaded || model.pairedKeys != nil {
                 PairingView().safeAreaInset(edge: .bottom) { StatusBar() }
             } else {
-                queue
+                // Nothing known yet (a fresh install): wait for iCloud rather than guess.
+                Theme.background.ignoresSafeArea()
             }
         }
         .foregroundStyle(Theme.text)
