@@ -19,7 +19,7 @@ enum Shim {
 
         let request = ProxyRequest(
             session: AgentSession.detect(environment: env, ancestry: { ProcessTree.ancestry(of: getpid()) }),
-            spacetermNodeId: SpacetermSurface.nodeId(environment: env), argv: args, env: ProxyRequest.forwardedEnvironment(env),
+            labelEnvironment: OpProxyConfig.load(paths)?.labelEnvironment(env), argv: args, env: ProxyRequest.forwardedEnvironment(env),
             cwd: FileManager.default.currentDirectoryPath)
 
         guard let body = try? JSONEncoder().encode(DaemonMessage.proxy(request)),

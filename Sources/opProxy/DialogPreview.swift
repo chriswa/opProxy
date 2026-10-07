@@ -66,8 +66,9 @@ enum DialogPreview {
         }
         contactSheet(shots, to: dir.appendingPathComponent("setup-themes.png"))
         let session = AgentSession(agent: .claude, sessionId: "c7d70e94-8847-4d74-b674-231862575006")
-        let surface = SpacetermSurface(nodeId: "60af98d7-fdba-42a0-bb45-e02c94476075",
-                                       title: "opProxy menu bar + hardening", agentName: "Kevin")
+        let label = RequesterLabel(name: "Kevin", title: "opProxy menu bar + hardening",
+                                   openURL: URL(string: "spaceterm-surface://60af98d7-fdba-42a0-bb45-e02c94476075"),
+                                   id: "60af98d7-fdba-42a0-bb45-e02c94476075")
         let linear = ItemIdentity(itemId: "h3j8k1m6n4p9r2s7t5v0w8x3yz", vaultId: "q4a7m2x9c1v6b3n8z5k0w2e7rt",
                                   title: "Issue Tracker API key", vaultName: "Private")
         let samples: [(String, [String], String?, String?, ItemIdentity)] = [
@@ -95,7 +96,7 @@ enum DialogPreview {
         ]
         for (name, argv, tool, message, target) in samples {
             guard case .success(let item) = ItemRequest.parse(argv) else { fatalError("unparseable sample \(argv)") }
-            let request = ProxyRequest(session: session, spacetermNodeId: surface.nodeId, argv: argv, env: [:],
+            let request = ProxyRequest(session: session, labelEnvironment: nil, argv: argv, env: [:],
                                        cwd: "/Users/me/projects/app")
             let requester: Requester
             let key: DialogKey
@@ -106,12 +107,12 @@ enum DialogPreview {
                         "48213  op item get Issue Tracker API key --fields label=credential --reveal",
                         "48190  python3 scripts/sync_linear.py --since yesterday",
                         "30112  -zsh"]),
-                    surface: nil))
+                    label: nil))
             } else {
                 key = .agent(ApprovalKey(audience: .session(agent: .claude, sessionId: session.sessionId),
                                          item: ItemRef(account: nil, vaultId: target.vaultId, itemId: target.itemId)))
-                // The minimal sample is an agent outside Spaceterm, which has no name.
-                requester = .agent(AgentRequester(session: session, surface: name == "minimal" ? nil : surface,
+                // The minimal sample is an agent nothing has named.
+                requester = .agent(AgentRequester(session: session, label: name == "minimal" ? nil : label,
                                                   caller: CallerContext(toolCommand: tool, viaProcess: nil),
                                                   lastMessage: message, agentPid: 26441))
             }

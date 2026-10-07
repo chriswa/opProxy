@@ -51,7 +51,7 @@ final class FeedModel: ObservableObject {
         } catch let error as CKError where ready && error.code == .unknownItem {
             // No request has been written yet; try again later.
         } catch {
-            lastError = "Couldn't reach iCloud: \(error.localizedDescription)"
+            lastError = Self.describe(error)
         }
     }
 
@@ -67,6 +67,16 @@ final class FeedModel: ObservableObject {
         info.category = "request"
         subscription.notificationInfo = info
         return subscription
+    }
+
+    /// What to tell someone about a CloudKit failure.
+    private static func describe(_ error: Error) -> String {
+        switch (error as? CKError)?.code {
+        case .notAuthenticated: return "Sign in to iCloud in Settings to use opProxy."
+        case .networkUnavailable, .networkFailure: return "Offline. Requests will show up when you're back online."
+        case .quotaExceeded: return "Your iCloud storage is full."
+        default: return "iCloud: \(error.localizedDescription)"
+        }
     }
 
     // MARK: Reading
@@ -93,7 +103,7 @@ final class FeedModel: ObservableObject {
         } catch let error as CKError where error.code == .changeTokenExpired {
             token = nil
         } catch {
-            lastError = "Couldn't refresh: \(error.localizedDescription)"
+            lastError = Self.describe(error)
         }
     }
 

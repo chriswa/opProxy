@@ -135,42 +135,36 @@ enum Requester {
         }
     }
 
-    /// "Kevin (Claude Code)" when Spaceterm has named the agent, else "Claude Code".
+    /// "Kevin (Claude Code)" when the label command named the agent, else "Claude Code".
     var name: String {
-        surface?.agentName.map { "\($0) (\(kind))" } ?? kind
+        label?.name.map { "\($0) (\(kind))" } ?? kind
     }
 
-    /// The dialog's first headline: "Kevin" when Spaceterm has named the agent, else
+    /// The dialog's first headline: "Kevin" when the label command named the agent, else
     /// "Claude Code Agent"; for a terminal, its app.
     var headline: String {
         switch self {
-        case .agent: return surface?.agentName ?? "\(kind) Agent"
-        case .terminal: return surface?.agentName ?? kind
+        case .agent: return label?.name ?? "\(kind) Agent"
+        case .terminal: return label?.name ?? kind
         }
     }
 
-    /// The Spaceterm surface the caller is in, if any.
-    var surface: SpacetermSurface? {
+    /// What the configured label command says about the caller, if anything.
+    var label: RequesterLabel? {
         switch self {
-        case .agent(let a): return a.surface
-        case .terminal(let t): return t.surface
+        case .agent(let a): return a.label
+        case .terminal(let t): return t.label
         }
     }
 
-    /// The surface's title: the only part of the surface an approval stores.
-    var surfaceTitle: String? { surface?.title }
-
-    var spacetermURL: URL? {
-        if let surface { return SpacetermSurface.link(surface.nodeId) }
-        if case .agent(let a) = self { return SpacetermSurface.link(a.session.sessionId) }
-        return nil
-    }
+    /// The label's title: the only part of the label an approval stores.
+    var labelTitle: String? { label?.title }
 }
 
 struct AgentRequester {
     /// As the caller claims it; only the agent process behind it is verified.
     let session: AgentSession
-    let surface: SpacetermSurface?
+    let label: RequesterLabel?
     let caller: CallerContext
     let lastMessage: String?
     let agentPid: pid_t
@@ -178,7 +172,7 @@ struct AgentRequester {
 
 struct TerminalRequester {
     let info: TerminalInfo
-    let surface: SpacetermSurface?
+    let label: RequesterLabel?
 }
 
 /// Everything the approval dialog shows.
@@ -195,7 +189,7 @@ struct ApprovalPrompt {
     /// Completes the system's "opProxy is trying to …" sentence; capitalized, it's also the
     /// line a phone shows beside its slide control.
     var touchIDReason: String {
-        let who = requester.surfaceTitle.map { "\(requester.name) in “\($0)”" } ?? requester.name
+        let who = requester.labelTitle.map { "\(requester.name) in “\($0)”" } ?? requester.name
         return "let \(who) \(item.summary(target))"
     }
 }
@@ -502,13 +496,13 @@ final class Daemon {
                 switch authority {
                 case .touchID(let context):
                     if let context { signingContext = context }
-                    try store.approve(stored, lifetime: lifetime, sessionLabel: prompt.requester.surfaceTitle,
+                    try store.approve(stored, lifetime: lifetime, sessionLabel: prompt.requester.labelTitle,
                                       grantedTo: grantedTo, itemLabel: itemLabel, vaultLabel: vaultLabel) { payload in
                         guard let signer else { throw NoApprovalKey() }
                         return try signer.sign(payload, context: context)
                     }
                 case .device(let proof, let grant?):
-                    try store.approve(stored, sessionLabel: prompt.requester.surfaceTitle, grantedTo: grantedTo, itemLabel: itemLabel,
+                    try store.approve(stored, sessionLabel: prompt.requester.labelTitle, grantedTo: grantedTo, itemLabel: itemLabel,
                                       vaultLabel: vaultLabel, approvedAt: grant.approvedAt, expiresAt: grant.expiresAt, proof: proof)
                 case .device(_, nil):
                     log.write("approved once, not remembered: the phone's reply carried no grant")
@@ -595,7 +589,7 @@ final class Daemon {
     private func agentPrompt(_ request: ProxyRequest, item: ItemRequest, target: ItemIdentity, session: AgentSession,
                              key: DialogKey, peer: pid_t, identity: SessionIdentity) -> ApprovalPrompt {
         let caller = CallerContext.from(chain: ProcessTree.ancestry(of: peer), agentPid: identity.agentPid)
-        let requester = AgentRequester(session: session, surface: spacetermSurface(request),
+        let requester = AgentRequester(session: session, label: label(request, peer: peer, agent: (session, identity.agentPid)),
                                        caller: caller, lastMessage: SessionInfo.lastAgentMessage(session),
                                        agentPid: identity.agentPid)
         return ApprovalPrompt(key: key, request: request, requester: .agent(requester), item: item, target: target,
@@ -605,13 +599,19 @@ final class Daemon {
     private func terminalPrompt(_ request: ProxyRequest, item: ItemRequest, target: ItemIdentity, key: DialogKey,
                                 peer: pid_t, sid: pid_t) -> ApprovalPrompt {
         let info = TerminalInfo.from(chain: ProcessTree.ancestry(of: peer), sid: sid)
-        let requester = TerminalRequester(info: info, surface: spacetermSurface(request))
+        let requester = TerminalRequester(info: info, label: label(request, peer: peer, agent: nil))
         return ApprovalPrompt(key: key, request: request, requester: .terminal(requester), item: item, target: target,
                               peerPid: peer)
     }
 
-    private func spacetermSurface(_ request: ProxyRequest) -> SpacetermSurface? {
-        request.spacetermNodeId.map { SpacetermSurface.lookup(nodeId: $0, environment: ProcessInfo.processInfo.environment) }
+    /// Asks the configured label command about the caller (README, "Naming agents").
+    private func label(_ request: ProxyRequest, peer: pid_t, agent: (session: AgentSession, pid: pid_t)?) -> RequesterLabel? {
+        guard let labeler = OpProxyConfig.load(paths)?.requesterLabel else { return nil }
+        var input: [String: Any] = ["environment": request.labelEnvironment ?? [:], "pid": Int(peer), "cwd": request.cwd]
+        if let agent {
+            input["agent"] = ["kind": agent.session.agent.rawValue, "sessionId": agent.session.sessionId, "pid": Int(agent.pid)]
+        }
+        return labeler.label(input)
     }
 
     // MARK: Which item a request means

@@ -466,7 +466,8 @@ check "disabled: straight to the real op" not_daemon "$(agent "$OP" read op://a/
 "$BIN" enable >/dev/null
 check "enabled again: proxied" via_daemon "$(agent "$OP" read op://a/b/c)"
 
-# --- Spaceterm: looked up by stable node ID; the agent's name is shown but never stored
+# --- Spaceterm, through the label command: looked up by stable node ID; the agent's name is
+# shown but never stored
 mkdir -p "$WORK/st"
 python3 - "$WORK/st/scripts.sock" <<'PY' & SPACETERM_PID=$!
 import json, socket, sys
@@ -482,12 +483,24 @@ while True:
     c.sendall((json.dumps(reply) + "\n").encode()); c.close()
 PY
 for _ in $(seq 50); do [ -S "$WORK/st/scripts.sock" ] && break; sleep 0.1; done
+cat > "$OPPROXY_HOME/config.json" <<CONFIG
+{"requesterLabel": {"command": ["$ROOT/scripts/spaceterm-label.py"],
+                    "environment": ["SPACETERM_NODE_ID", "SPACETERM_SURFACE_ID"]}}
+CONFIG
 SPACETERM_HOME="$WORK/st" start_daemon approved
 SPACETERM_NODE_ID=node-1 SPACETERM_SURFACE_ID=pty-2 SID=sess-N agent "$OP" read op://n/a/me >/dev/null
 check "spaceterm: dialog shows the agent's name" grep -q '"headline":"Kevin".*"label":"fix flaky tests".*"requester":"Kevin (Claude Code)"' "$LOG"
 check "spaceterm: approval stores the title" grep -q '"sessionLabel" : "fix flaky tests"' "$OPPROXY_HOME/approvals.json"
 check "spaceterm: approval never stores the name" not_in Kevin "$OPPROXY_HOME/approvals.json"
+label() { SPACETERM_HOME="$WORK/st" "$ROOT/scripts/spaceterm-label.py" <<<"$1"; }
+check "spaceterm label: node ID wins over the pty ID" grep -q '"name": "Kevin"' \
+    <<<"$(label '{"environment": {"SPACETERM_SURFACE_ID": "pty-2", "SPACETERM_NODE_ID": "node-1"}}')"
+check "spaceterm label: unknown node keeps its link" grep -q '"openURL": "spaceterm-surface://node-9"' \
+    <<<"$(label '{"environment": {"SPACETERM_NODE_ID": "node-9"}}')"
+check "spaceterm label: agent outside a surface opens by session" grep -q 'spaceterm-surface://sess-Q' \
+    <<<"$(label '{"environment": {}, "agent": {"sessionId": "sess-Q"}}')"
 kill "$SPACETERM_PID" 2>/dev/null
+rm "$OPPROXY_HOME/config.json"
 
 echo; echo "$PASS passed, $FAIL failed"
 [ $FAIL = 0 ]

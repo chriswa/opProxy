@@ -198,20 +198,6 @@ final class AgentSessionTests: XCTestCase {
         XCTAssertEqual(AgentSession.detect(environment: cursorEnv, ancestry: { cursorChain })?.sessionId, "cursor-inner")
     }
 
-    func testSpacetermNodeIdSurvivesRestarts() {
-        XCTAssertEqual(SpacetermSurface.nodeId(environment: ["SPACETERM_SURFACE_ID": "pty-2", "SPACETERM_NODE_ID": "n1"]), "n1")
-        XCTAssertEqual(SpacetermSurface.nodeId(environment: ["SPACETERM_SURFACE_ID": "s1", "SPACETERM_NODE_ID": ""]), "s1")
-        XCTAssertNil(SpacetermSurface.nodeId(environment: [:]))
-    }
-
-    func testSpacetermSurfaceReply() {
-        let named = SpacetermSurface.from(reply: ["type": "script-get-node-result", "agentName": " Kevin ",
-                                                  "node": ["name": "", "shellTitleHistory": ["fix flaky tests", "zsh"]]],
-                                          nodeId: "n1")
-        XCTAssertEqual(named, SpacetermSurface(nodeId: "n1", title: "fix flaky tests", agentName: "Kevin"))
-        XCTAssertEqual(SpacetermSurface.from(reply: ["error": "unknown-node"], nodeId: "n1"), SpacetermSurface(nodeId: "n1"))
-    }
-
     func testEnvironmentForwarding() {
         let env = ["OP_ACCOUNT": "a", "OP_FORMAT": "json", "OP_SESSION_x": "t", "PATH": "/bin"]
         XCTAssertEqual(ProxyRequest.forwardedEnvironment(env), ["OP_ACCOUNT": "a", "OP_FORMAT": "json"])

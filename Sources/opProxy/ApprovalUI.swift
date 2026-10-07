@@ -157,7 +157,7 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
     func markAbandoned() { view?.showAbandoned() }
 
     func openSession() {
-        if let url = prompt.requester.spacetermURL { NSWorkspace.shared.open(url) }
+        if let url = prompt.requester.label?.openURL { NSWorkspace.shared.open(url) }
     }
 
     private func finish(_ decision: Decision?) {
@@ -341,11 +341,11 @@ final class ApprovalView: NSView {
         var whereParts: [String]
         switch requester {
         case .agent(let a):
-            // The kind is already in the headline when Spaceterm hasn't named the agent.
-            whereParts = (a.surface?.agentName != nil ? [requester.kind] : [])
-                + [a.surface?.title.map { "in “\($0)”" } ?? "in an untitled session"]
+            // The kind is already in the headline when nothing named the agent.
+            whereParts = (a.label?.name != nil ? [requester.kind] : [])
+                + [a.label?.title.map { "in “\($0)”" } ?? "in an untitled session"]
         case .terminal(let t):
-            whereParts = ["in a terminal tab"] + [t.info.tty, t.surface?.title.map { "“\($0)”" }].compactMap { $0 }
+            whereParts = ["in a terminal tab"] + [t.info.tty, t.label?.title.map { "“\($0)”" }].compactMap { $0 }
         }
         let whereText = whereParts.joined(separator: " · ")
         let session = NSTextField(labelWithString: whereText)
@@ -354,8 +354,8 @@ final class ApprovalView: NSView {
         session.lineBreakMode = .byTruncatingTail
         session.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         row.addArrangedSubview(session)
-        if requester.spacetermURL != nil {
-            let link = NSButton(title: "Open in Spaceterm ↗", target: self, action: #selector(openSession))
+        if requester.label?.openURL != nil {
+            let link = NSButton(title: "Open ↗", target: self, action: #selector(openSession))
             link.isBordered = false
             link.contentTintColor = Caution.link
             link.font = .systemFont(ofSize: 13)
@@ -771,7 +771,7 @@ final class ScriptedApprover: LocalApprover {
             "details": prompt.item.details.map { "\($0.label)=\($0.value)" },
             "headline": prompt.requester.headline,
             "requester": prompt.requester.name,
-            "label": prompt.requester.surfaceTitle ?? NSNull(),
+            "label": prompt.requester.labelTitle ?? NSNull(),
         ]
         var fields = shown
         switch prompt.requester {

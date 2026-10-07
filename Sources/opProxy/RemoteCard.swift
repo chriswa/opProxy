@@ -24,7 +24,7 @@ enum RemoteCard {
             ],
             "confirm": prompt.touchIDReason.prefix(1).uppercased() + prompt.touchIDReason.dropFirst(),
         ]
-        if let surface = prompt.requester.surface { doc["surfaceId"] = surface.nodeId }
+        if let id = prompt.requester.label?.id { doc["surfaceId"] = id }
         if abandoned { doc["notice"] = abandonedNotice }
         let data = try! JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys, .withoutEscapingSlashes])
         return String(decoding: data, as: UTF8.self)
@@ -33,9 +33,9 @@ enum RemoteCard {
     private static func subtitle(_ requester: Requester) -> String {
         switch requester {
         case .agent(let a):
-            return requester.name + " · " + (a.surface?.title.map { "“\($0)”" } ?? "untitled session")
+            return requester.name + " · " + (a.label?.title.map { "“\($0)”" } ?? "untitled session")
         case .terminal(let t):
-            return ([requester.name, "terminal tab"] + [t.info.tty, t.surface?.title.map { "“\($0)”" }].compactMap { $0 })
+            return ([requester.name, "terminal tab"] + [t.info.tty, t.label?.title.map { "“\($0)”" }].compactMap { $0 })
                 .joined(separator: " · ")
         }
     }
