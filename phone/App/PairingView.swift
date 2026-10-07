@@ -18,7 +18,13 @@ struct PairingView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     Text("Pair with your Mac").font(.largeTitle.weight(.bold))
-                    Text("On the Mac, click the key in the menu bar, choose Paired Phones → Pair an iPhone…, then scan the code it shows.")
+                    VStack(alignment: .leading, spacing: 14) {
+                        Step(number: 1, text: "On your Mac, click the key icon in the menu bar.")
+                        Step(number: 2, text: "Choose **Paired Phones**, then **Pair an iPhone…**. A QR code opens on the Mac.")
+                        Step(number: 3, text: "Tap the button below and point this phone at the code.")
+                    }
+                    Text("Or open Terminal on the Mac and run `opProxy pair-iphone`.")
+                        .font(.footnote)
                         .foregroundStyle(Theme.dim)
                     Button {
                         scanning = true
@@ -111,6 +117,23 @@ private struct QRScanner: UIViewControllerRepresentable {
                 scanner.stopScanning()
                 found(payload)
             }
+        }
+    }
+}
+
+/// One numbered step of the pairing instructions.
+private struct Step: View {
+    let number: Int
+    let text: LocalizedStringKey
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text("\(number)")
+                .font(.subheadline.weight(.bold).monospacedDigit())
+                .foregroundStyle(Theme.stripeDark)
+                .frame(width: 24, height: 24)
+                .background(Theme.tone(nil), in: Circle())
+            Text(text).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
