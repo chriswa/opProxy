@@ -18,7 +18,7 @@ struct PairingView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     Text("Pair with your Mac").font(.largeTitle.weight(.bold))
-                    Text("On the Mac, open the opProxy menu, choose Paired Phones → Pair an iPhone…, then scan the code it shows.")
+                    Text("On the Mac, click the key in the menu bar, choose Paired Phones → Pair an iPhone…, then scan the code it shows.")
                         .foregroundStyle(Theme.dim)
                     Button {
                         scanning = true
@@ -43,7 +43,7 @@ struct PairingView: View {
 
                     DisclosureGroup("Paste a code instead", isExpanded: $pasting) {
                         VStack(alignment: .leading, spacing: 10) {
-                            TextField("opproxy-pair:2:…", text: $pasted)
+                            TextField("Pairing code", text: $pasted)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .font(.body.monospaced())

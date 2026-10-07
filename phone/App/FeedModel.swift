@@ -99,8 +99,8 @@ final class FeedModel: ObservableObject {
                                                subscriptionID: "new-requests", options: [.firesOnRecordCreation])
         subscription.zoneID = zoneID
         let info = CKSubscription.NotificationInfo()
-        info.title = "opProxy"
-        info.alertBody = "An agent is asking for a 1Password secret."
+        info.title = "Secret Proxy"
+        info.alertBody = "An agent is asking for a secret."
         info.soundName = "default"
         info.shouldSendMutableContent = true
         info.category = "request"
@@ -118,7 +118,7 @@ final class FeedModel: ObservableObject {
     /// What to tell someone about a CloudKit failure.
     private static func describe(_ error: Error) -> String {
         switch (error as? CKError)?.code {
-        case .notAuthenticated: return "Sign in to iCloud in Settings to use opProxy."
+        case .notAuthenticated: return "Sign in to iCloud in Settings to use Secret Proxy."
         case .networkUnavailable, .networkFailure: return "Offline. Requests will show up when you're back online."
         case .quotaExceeded: return "Your iCloud storage is full."
         default: return "iCloud: \(error.localizedDescription)"
@@ -210,7 +210,7 @@ final class FeedModel: ObservableObject {
                 await refresh()
                 return response["ok"] as? Bool == true ? nil : (response["error"] as? String ?? "The Mac refused it.")
             }
-            return "The Mac didn't answer. Is opProxy running on it?"
+            return "The Mac didn't answer. Is Secret Proxy running on it?"
         } catch {
             return error.localizedDescription
         }
@@ -232,7 +232,7 @@ final class FeedModel: ObservableObject {
     /// it to trust this phone's key. Returns nil once paired, else why not.
     func pair(qr: String, progress: @escaping (String) -> Void) async -> String? {
         guard let (code, macUser) = CloudFeed.Rendezvous.parse(qr: qr) else {
-            return "That isn't an opProxy pairing code. Update opProxy on the Mac if it's an older one."
+            return "That isn't a Secret Proxy pairing code. If it came from an older Mac version, update it there."
         }
         await setUp()
         guard ready else { return lastError }
@@ -279,7 +279,7 @@ final class FeedModel: ObservableObject {
         }
         let share = existing ?? CKShare(recordZoneID: zoneID)
         share.publicPermission = .none
-        share[CKShare.SystemFieldKey.title] = "opProxy approvals"
+        share[CKShare.SystemFieldKey.title] = "Secret Proxy requests"
         func isMac(_ participant: CKShare.Participant) -> Bool {
             participant.userIdentity.userRecordID?.recordName == macUser
         }
