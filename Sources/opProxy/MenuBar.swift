@@ -41,8 +41,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let quitItem = NSMenuItem(title: "Quit opProxy", action: #selector(quitApp), keyEquivalent: "")
         quitItem.target = self
         quitItem.toolTip = "op calls go straight to 1Password until opProxy is opened again or you log in"
-        [statusLine, detailLine, .separator(), refreshItem, .separator(), .separator(), phonesItem, installedItem, loginItem,
-         .separator(), restartItem, quitItem].forEach(menu.addItem)
+        // Top level, not under Paired Phones, so it's easy to find; the iPhone app shows a
+        // picture of this menu (PairingGuide) to point to it.
+        let pairItem = NSMenuItem(title: "Pair an iPhone…", action: #selector(pairPhone), keyEquivalent: "")
+        pairItem.target = self
+        pairItem.isHidden = pairing == nil
+        [statusLine, detailLine, .separator(), refreshItem, .separator(), .separator(), pairItem, phonesItem, installedItem,
+         loginItem, .separator(), restartItem, quitItem].forEach(menu.addItem)
         menu.delegate = self
         item.menu = menu
         daemon.auth.onChange = { [weak self] _ in
@@ -202,12 +207,6 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             let none = NSMenuItem(title: "No Paired Phones", action: nil, keyEquivalent: "")
             none.isEnabled = false
             submenu.addItem(none)
-        }
-        if pairing != nil {
-            let pair = NSMenuItem(title: "Pair an iPhone…", action: #selector(pairPhone), keyEquivalent: "")
-            pair.target = self
-            submenu.addItem(pair)
-            submenu.addItem(.separator())
         }
         for phone in phones {
             let item = NSMenuItem(title: "Unpair \(phone.name) · \(phone.fingerprint)", action: #selector(unpair(_:)), keyEquivalent: "")

@@ -1,6 +1,5 @@
 import FeedProtocol
 import SwiftUI
-import VisionKit
 
 struct PairingView: View {
     @EnvironmentObject private var model: FeedModel
@@ -18,13 +17,7 @@ struct PairingView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
                     Text("Pair with your Mac").font(.largeTitle.weight(.bold))
-                    VStack(alignment: .leading, spacing: 14) {
-                        Step(number: 1, text: "On your Mac, click the key icon in the menu bar.")
-                        Step(number: 2, text: "Choose **Paired Phones**, then **Pair an iPhone…**. A QR code opens on the Mac.")
-                        Step(number: 3, text: "Tap the button below and point this phone at the code.")
-                    }
-                    Text("Or open Terminal on the Mac and run `opProxy pair-iphone`.")
-                        .font(.footnote)
+                    Text("Pair this phone with the Mac that asks for secrets, so its requests come here.")
                         .foregroundStyle(Theme.dim)
                     Button {
                         scanning = true
@@ -32,7 +25,7 @@ struct PairingView: View {
                         Label("Scan the Mac's code", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(FilledButton())
-                    .disabled(busy || !DataScannerViewController.isSupported)
+                    .disabled(busy)
 
                     if let progress {
                         HStack(spacing: 10) { ProgressView().tint(Theme.text); Text(progress) }
@@ -67,11 +60,7 @@ struct PairingView: View {
         .foregroundStyle(Theme.text)
         .background(Theme.background)
         .sheet(isPresented: $scanning) {
-            QRScanner { payload in
-                scanning = false
-                pair(payload)
-            }
-            .ignoresSafeArea()
+            PairingGuide { payload in pair(payload) }
         }
     }
 
@@ -85,55 +74,6 @@ struct PairingView: View {
             busy = false
             // Opened from the empty queue to pair again: done here.
             if failure == nil { dismiss() }
-        }
-    }
-}
-
-/// Reads the first QR code the camera sees.
-private struct QRScanner: UIViewControllerRepresentable {
-    let found: (String) -> Void
-
-    func makeUIViewController(context: Context) -> DataScannerViewController {
-        let scanner = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])], isHighlightingEnabled: true)
-        scanner.delegate = context.coordinator
-        try? scanner.startScanning()
-        return scanner
-    }
-
-    func updateUIViewController(_ controller: DataScannerViewController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator(found: found) }
-
-    final class Coordinator: NSObject, DataScannerViewControllerDelegate {
-        let found: (String) -> Void
-        private var done = false
-
-        init(found: @escaping (String) -> Void) { self.found = found }
-
-        func dataScanner(_ scanner: DataScannerViewController, didAdd items: [RecognizedItem], allItems: [RecognizedItem]) {
-            for case .barcode(let code) in items {
-                guard !done, let payload = code.payloadStringValue, CloudFeed.Rendezvous.parse(qr: payload) != nil else { continue }
-                done = true
-                scanner.stopScanning()
-                found(payload)
-            }
-        }
-    }
-}
-
-/// One numbered step of the pairing instructions.
-private struct Step: View {
-    let number: Int
-    let text: LocalizedStringKey
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text("\(number)")
-                .font(.subheadline.weight(.bold).monospacedDigit())
-                .foregroundStyle(Theme.stripeDark)
-                .frame(width: 24, height: 24)
-                .background(Theme.tone(nil), in: Circle())
-            Text(text).fixedSize(horizontal: false, vertical: true)
         }
     }
 }
