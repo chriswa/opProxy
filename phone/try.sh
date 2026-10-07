@@ -46,7 +46,7 @@ STUB
     chmod +x "$OPPROXY_REAL_OP"
     OPPROXY_NO_AUTO_AUTH=1 OPPROXY_OP_REQUIREMENT=none nohup "$BIN" daemon >>"$OPPROXY_HOME/launch.log" 2>&1 &
     echo $! > "$PIDFILE"
-    echo "test daemon running (log: $OPPROXY_HOME/daemon.log). Pair from its menu bar icon: Paired Phones → Pair an iPhone…"
+    echo "test daemon running (log: $OPPROXY_HOME/daemon.log). Pair from its menu bar icon: Pair an iPhone…"
     DEVICE=$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && $0 !~ /unavailable/ {print $3; exit}')
     if [ -n "$DEVICE" ]; then
         (cd "$ROOT/phone" && xcodegen generate --quiet)
