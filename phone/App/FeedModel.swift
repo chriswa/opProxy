@@ -147,10 +147,16 @@ final class FeedModel: ObservableObject {
         await setUp()
         guard ready else { return }
         do {
+            // A fetch from scratch sees every record, so no `hello` means no Mac has joined.
+            let full = token == nil
+            var sawHello = false
             var more = true
             while more {
                 let changes = try await db.recordZoneChanges(inZoneWith: zoneID, since: token)
-                for case (_, .success(let change)) in changes.modificationResultsByID { apply(change.record) }
+                for case (let id, .success(let change)) in changes.modificationResultsByID {
+                    sawHello = sawHello || id.recordName == CloudFeed.State.hello
+                    apply(change.record)
+                }
                 for deletion in changes.deletions {
                     let id = deletion.recordID.recordName
                     update(\.items, items.filter { $0.id != id })
@@ -158,6 +164,7 @@ final class FeedModel: ObservableObject {
                 token = changes.changeToken
                 more = changes.moreComing
             }
+            if full && !sawHello { update(\.pairedKeys, nil) }
             update(\.lastError, nil)
         } catch let error as CKError where error.code == .changeTokenExpired {
             token = nil
