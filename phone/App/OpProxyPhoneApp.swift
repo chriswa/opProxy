@@ -29,10 +29,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         return true
     }
 
+    /// With the app open, the request is already on screen: fetch it, and show nothing.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
         await model?.refresh()
-        return [.banner, .sound, .list]
+        return []
     }
 
     /// Requests are answered oldest first, so a tapped notification just opens the queue.

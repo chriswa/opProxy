@@ -204,8 +204,8 @@ struct PressScale: ButtonStyle {
     }
 }
 
-/// A picker as rows of toggle buttons, one per facet (Allow, then For), with the chosen
-/// option's hint beneath. A picker without facets is a single row of its labels.
+/// A picker as rows of toggle buttons, one per facet (Allow, then For). A picker without
+/// facets is a single row of its labels.
 private struct PickerRows: View {
     let picker: FeedDocument.Picker
     @Binding var choice: String?
@@ -228,9 +228,6 @@ private struct PickerRows: View {
                     }
                     .opacity(current == nil ? 0.4 : 1)
                 }
-            }
-            if let hint = chosen?.hint {
-                Text(hint).font(.caption).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true)
             }
         }
     }
