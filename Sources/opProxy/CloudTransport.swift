@@ -160,8 +160,21 @@ final class CloudTransport: FeedTransport {
         }
         guard !save.isEmpty || !delete.isEmpty else { return }
         let (saved, deleted) = try await db.modifyRecords(saving: save, deleting: delete, savePolicy: .allKeys, atomically: false)
-        if full { log.write("cloud feed: \(link.zoneName) of \(link.ownerName.prefix(10)): wrote \(save.count), deleted \(delete.count)") }
-        for case (let id, .failure(let error)) in saved { throw Failure.record(id.recordName, error) }
+        // A record written under an earlier membership of the share can't be overwritten: its
+        // keys went with that membership. Delete it and write it afresh under this one.
+        var stale: [CKRecord.ID] = []
+        for case (let id, .failure(let error)) in saved {
+            guard (error as? CKError)?.code == .internalError else { throw Failure.record(id.recordName, error) }
+            stale.append(id)
+        }
+        if !stale.isEmpty {
+            log.write("cloud feed: \(link.zoneName) of \(link.ownerName.prefix(10)): rewriting \(stale.map(\.recordName)) "
+                      + "written under an earlier membership")
+            _ = try await db.modifyRecords(saving: [], deleting: stale)
+            let again = save.filter { stale.contains($0.recordID) }.map(Self.fresh)
+            let (resaved, _) = try await db.modifyRecords(saving: again, deleting: [], savePolicy: .allKeys)
+            for case (let id, .failure(let error)) in resaved { throw Failure.record(id.recordName, error) }
+        }
         for case (let id, .failure(let error)) in deleted where (error as? CKError)?.code != .unknownItem {
             throw Failure.record(id.recordName, error)
         }
@@ -270,6 +283,13 @@ final class CloudTransport: FeedTransport {
             if now { return continuation.resume() }
             DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { [weak self] in self?.poke() }
         }
+    }
+
+    /// The same record, unsaved, so it's created anew rather than updated.
+    private static func fresh(_ record: CKRecord) -> CKRecord {
+        let copy = CKRecord(recordType: record.recordType, recordID: record.recordID)
+        for key in record.encryptedValues.allKeys() { copy.encryptedValues[key] = record.encryptedValues[key] }
+        return copy
     }
 
     private static func name(_ message: FeedMessage) -> String {
