@@ -16,7 +16,8 @@ final class FeedModel: ObservableObject {
     @Published private(set) var pairedKeys: [String]? = UserDefaults.standard.stringArray(forKey: FeedModel.pairedKeysDefault) {
         didSet { UserDefaults.standard.set(pairedKeys, forKey: Self.pairedKeysDefault) }
     }
-    /// Whether the first fetch from iCloud has finished, so `paired` is more than a guess.
+    /// Whether a fetch from iCloud has finished since the app last came to the foreground, so
+    /// `paired` and `items` are more than a guess.
     @Published private(set) var loaded = false
     private static let pairedKeysDefault = "pairedKeys"
     @Published private(set) var lastError: String?
@@ -69,6 +70,9 @@ final class FeedModel: ObservableObject {
         } else {
             poller?.cancel()
             poller = nil
+            // What's on screen may be stale by the time the app is back: fetch before
+            // claiming nothing is pending.
+            update(\.loaded, false)
         }
     }
 
@@ -209,8 +213,8 @@ final class FeedModel: ObservableObject {
             let data = try JSONSerialization.data(withJSONObject: message, options: [.sortedKeys, .withoutEscapingSlashes])
             record.encryptedValues[CloudFeed.Inbox.message] = String(decoding: data, as: UTF8.self)
             _ = try await db.save(record)
-            for _ in 0..<90 {
-                try await Task.sleep(nanoseconds: 1_000_000_000)
+            for _ in 0..<180 {
+                try await Task.sleep(nanoseconds: 500_000_000)
                 let current = try await db.record(for: record.recordID)
                 guard let text = current.encryptedValues[CloudFeed.Inbox.response] as? String,
                       let response = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { continue }

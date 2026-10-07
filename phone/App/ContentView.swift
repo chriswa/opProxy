@@ -25,7 +25,8 @@ struct ContentView: View {
     /// away, it slides off and uncovers the next request, or the empty queue, underneath.
     private var queue: some View {
         ZStack {
-            empty.zIndex(-.infinity)
+            // Only claim nothing is pending once iCloud has said so.
+            Group { if model.loaded { empty } else { loading } }.zIndex(-.infinity)
             if let item = model.current {
                 RequestView(item: item, waiting: model.waiting)
                     .id(item.id)
@@ -36,6 +37,14 @@ struct ContentView: View {
             }
         }
         .animation(.easeIn(duration: 0.35), value: model.current?.id)
+    }
+
+    private var loading: some View {
+        VStack(spacing: 0) {
+            CautionStripe(tone: Theme.tone(nil)).frame(height: 8).opacity(0.5)
+            Spinner(color: Theme.dim).frame(width: 36, height: 36).frame(maxHeight: .infinity)
+        }
+        .background(Theme.background)
     }
 
     private var empty: some View {

@@ -126,7 +126,7 @@ final class CloudTransport: FeedTransport {
             }
             prune()
             let quick = lock.withLock { mirror.pending } || pairingUntil > Date()
-            await sleep(seconds: quick ? 2 : 30)
+            await sleep(seconds: quick ? 1 : 30)
         }
     }
 

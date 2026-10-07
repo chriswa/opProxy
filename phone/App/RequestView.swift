@@ -5,16 +5,18 @@ import SwiftUI
 /// the answers stay at the bottom, and the details between them scroll. Give each request its
 /// own view identity, so a choice made on one never carries over to the next.
 struct RequestView: View {
-    /// How an answer the Mac accepted is acknowledged before the screen moves on.
-    enum Outcome { case approved, denied }
+    /// An answer on its way: shown at once, then confirmed when the Mac accepts it.
+    struct Answer: Equatable {
+        let approved: Bool
+        var confirmed = false
+    }
 
     @EnvironmentObject private var model: FeedModel
     let item: FeedItem
     let waiting: Int
     @State private var picks: [String: String] = [:]
-    @State private var sending = false
     @State private var error: String?
-    @State private var outcome: Outcome?
+    @State private var answer: Answer?
 
     var body: some View {
         if let doc = item.parsed {
@@ -49,7 +51,7 @@ struct RequestView: View {
         }
         .foregroundStyle(Theme.text)
         .background(Theme.background)
-        .overlay { if let outcome { Acknowledgement(outcome: outcome) } }
+        .overlay { if let answer { Acknowledgement(answer: answer) } }
         .onAppear {
             for picker in doc.pickers ?? [] where picks[picker.id] == nil {
                 picks[picker.id] = picker.default ?? picker.options.first?.id
@@ -124,10 +126,10 @@ struct RequestView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(PressScale())
-                    .disabled(sending || outcome != nil)
+                    .disabled(answer != nil)
                 }
                 if let approve {
-                    SlideToApprove(label: approve.label, busy: sending, done: outcome == .approved) { send(approve.id) }
+                    SlideToApprove(label: approve.label, done: answer?.approved == true) { send(approve.id) }
                 }
             }
         }
@@ -140,24 +142,26 @@ struct RequestView: View {
         Binding(get: { picks[picker.id] }, set: { picks[picker.id] = $0 })
     }
 
-    /// Sends the answer. The screen holds on to this request meanwhile, so it stays put
-    /// through the acknowledgement even once it has left the queue, then lets it go.
+    /// Sends the answer, showing it at once and confirming it when the Mac accepts it. The
+    /// screen holds on to this request meanwhile, so it stays put through the
+    /// acknowledgement even once it has left the queue, then lets it go.
     private func send(_ action: String) {
-        sending = true
+        let approved = action == "approve"
         error = nil
         model.hold(item)
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { answer = Answer(approved: approved) }
         Task {
-            let failure = await model.answer(item, action: action, picks: action == "approve" ? picks.compactMapValues { $0 } : [:])
-            sending = false
+            let failure = await model.answer(item, action: action, picks: approved ? picks.compactMapValues { $0 } : [:])
             guard failure == nil else {
+                withAnimation { answer = nil }
                 error = failure
                 model.hold(nil)
                 UINotificationFeedbackGenerator().notificationOccurred(.error)
                 return
             }
-            let approved = action == "approve"
             UINotificationFeedbackGenerator().notificationOccurred(approved ? .success : .warning)
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.6)) { outcome = approved ? .approved : .denied }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) { answer?.confirmed = true }
             try? await Task.sleep(nanoseconds: 900_000_000)
             model.hold(nil)
         }
@@ -169,29 +173,51 @@ struct RequestView: View {
     }
 }
 
-/// The answer, confirmed: a wash of its colour and a badge that pops in.
+/// The answer, the moment it's given: a wash of its colour and its badge, dimmed with a
+/// spinning ring while it goes to the Mac, then popping to full colour once the Mac accepts it.
 private struct Acknowledgement: View {
-    let outcome: RequestView.Outcome
+    let answer: RequestView.Answer
     @State private var shown = false
 
     var body: some View {
-        let approved = outcome == .approved
-        let color = approved ? Theme.approve : Theme.danger
+        let color = answer.approved ? Theme.approve : Theme.danger
         ZStack {
-            color.opacity(shown ? 0.28 : 0).ignoresSafeArea()
+            color.opacity(shown ? (answer.confirmed ? 0.28 : 0.14) : 0).ignoresSafeArea()
             VStack(spacing: 12) {
-                Image(systemName: approved ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .font(.system(size: 96, weight: .bold))
-                    .foregroundStyle(.white, color)
-                    .symbolEffect(.bounce, value: shown)
-                Text(approved ? "Approved" : "Denied").font(.title.weight(.bold))
+                ZStack {
+                    Image(systemName: answer.approved ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.system(size: 96, weight: .bold))
+                        .foregroundStyle(.white, color)
+                        .opacity(answer.confirmed ? 1 : 0.45)
+                        .scaleEffect(answer.confirmed ? 1 : 0.85)
+                        .symbolEffect(.bounce, value: answer.confirmed)
+                    if !answer.confirmed { Spinner(color: color).frame(width: 128, height: 128) }
+                }
+                Text(answer.confirmed ? (answer.approved ? "Approved" : "Denied") : "Sending to the Mac…")
+                    .font(answer.confirmed ? .title.weight(.bold) : .headline)
+                    .foregroundStyle(answer.confirmed ? Theme.text : Theme.dim)
+                    .contentTransition(.opacity)
             }
             .padding(32)
             .background(Theme.well.opacity(0.92), in: RoundedRectangle(cornerRadius: 28))
-            .scaleEffect(shown ? 1 : 0.4)
+            .scaleEffect(shown ? 1 : 0.6)
             .opacity(shown ? 1 : 0)
         }
-        .onAppear { withAnimation(.spring(response: 0.35, dampingFraction: 0.55)) { shown = true } }
+        .onAppear { withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) { shown = true } }
+    }
+}
+
+/// A partial ring that turns while something is on its way.
+struct Spinner: View {
+    let color: Color
+    @State private var turning = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0, to: 0.7)
+            .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+            .rotationEffect(.degrees(turning ? 360 : 0))
+            .onAppear { withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { turning = true } }
     }
 }
 
@@ -343,10 +369,9 @@ private struct SectionView: View {
 }
 
 /// Approving takes a deliberate drag all the way across, so a stray tap can't approve. Once
-/// the answer is accepted (`done`), the knob stays at the end and turns into a tick.
+/// approved (`done`), the knob stays at the end and turns into a tick.
 struct SlideToApprove: View {
     let label: String
-    let busy: Bool
     let done: Bool
     let action: () -> Void
     @State private var offset: CGFloat = 0
@@ -359,7 +384,7 @@ struct SlideToApprove: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(Theme.approve.opacity(0.18)).overlay(Capsule().stroke(Theme.approve.opacity(0.7)))
                 Capsule().fill(Theme.approve).frame(width: filled + knob + 8)
-                Text(busy ? "Sending…" : "Slide to \(label.lowercased())")
+                Text("Slide to \(label.lowercased())")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.approve)
                     .frame(maxWidth: .infinity)
@@ -375,7 +400,6 @@ struct SlideToApprove: View {
                         .onChanged { offset = min(max(0, $0.translation.width), travel) }
                         .onEnded { _ in
                             if offset >= travel - 2 {
-                                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                                 action()
                             } else {
                                 withAnimation(.spring) { offset = 0 }
@@ -383,10 +407,9 @@ struct SlideToApprove: View {
                         })
             }
             .animation(.spring(response: 0.3), value: done)
-            // A failed send slides the knob back.
-            .onChange(of: busy) { _, busy in if !busy && !done { withAnimation(.spring) { offset = 0 } } }
-            .opacity(busy ? 0.7 : 1)
-            .allowsHitTesting(!busy && !done)
+            // A refused answer slides the knob back.
+            .onChange(of: done) { _, done in if !done { withAnimation(.spring) { offset = 0 } } }
+            .allowsHitTesting(!done)
         }
         .frame(height: 52)
     }
