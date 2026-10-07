@@ -35,6 +35,13 @@ public enum Chime {
         return out.map { $0 * peak / loudest }
     }
 
+    /// Whether a prompt that someone else draws (1Password's, or macOS's privacy dialog) has
+    /// just appeared and should ring, given the owner of the prompt on screen now and at the
+    /// last look. Each new prompt rings once; one that only moves or resizes doesn't.
+    public static func rings(forPromptBy current: String?, after previous: String?) -> Bool {
+        current != nil && current != previous
+    }
+
     /// 16-bit mono WAV.
     public static func wav() -> Data {
         let pcm = samples().map { Int16($0 * Double(Int16.max)) }

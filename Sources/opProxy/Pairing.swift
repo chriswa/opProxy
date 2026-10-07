@@ -70,8 +70,7 @@ private final class PairingPrompt: NSObject {
         window.appearance = NSAppearance(named: .darkAqua)
         window.level = .floating
         window.center()
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+        window.presentForAnswer()
     }
 
     @objc private func clicked(_ sender: NSButton) {

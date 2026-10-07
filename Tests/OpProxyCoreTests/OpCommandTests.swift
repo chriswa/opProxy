@@ -536,4 +536,15 @@ final class ChimeTests: XCTestCase {
         XCTAssertEqual(wav.prefix(4), Data("RIFF".utf8))
         XCTAssertEqual(wav.count, 44 + samples.count * 2)
     }
+
+    func testEachFramedPromptRingsOnceAsItAppears() {
+        // Startup on a Mac that asks for privacy consent first: two prompts, two chimes.
+        let looks: [String?] = [nil, "UserNotificationCenter", "UserNotificationCenter", nil, "1Password", "1Password"]
+        let rings = zip(looks.dropFirst(), looks).filter { Chime.rings(forPromptBy: $0, after: $1) }.map { $0.0 }
+        XCTAssertEqual(rings, ["UserNotificationCenter", "1Password"])
+        // Straight from one prompt to the next, with no gap between them.
+        XCTAssertTrue(Chime.rings(forPromptBy: "1Password", after: "UserNotificationCenter"))
+        // Prompt gone: nothing to ring for.
+        XCTAssertFalse(Chime.rings(forPromptBy: nil, after: "1Password"))
+    }
 }

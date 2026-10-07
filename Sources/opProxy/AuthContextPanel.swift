@@ -1,8 +1,9 @@
 import AppKit
 import OpProxyCore
 
-/// Sits just below 1Password's own authorization prompt and says what it's for. No buttons:
-/// it never takes focus or clicks, so the 1Password dialog stays the thing you act on.
+/// Sits just below 1Password's own authorization prompt and says what it's for, chiming as each
+/// prompt it frames appears. No buttons: it never takes focus or clicks, so the 1Password
+/// dialog stays the thing you act on.
 final class AuthContextPanel: AuthPromptObserver {
     /// Only calls still waiting after this long are assumed to be showing a prompt.
     static let showDelay: TimeInterval = 0.4
@@ -31,6 +32,8 @@ final class AuthContextPanel: AuthPromptObserver {
 
     private var reason: AuthReason = .startup
     private var prompt: PromptWindow?
+    /// Owner of the prompt last framed, so each new prompt chimes once.
+    private var framedOwner: String?
 
     private func show(_ reason: AuthReason) {
         hide()
@@ -45,6 +48,7 @@ final class AuthContextPanel: AuthPromptObserver {
         panel.isOpaque = false
         panel.hasShadow = true
         self.panel = panel
+        framedOwner = nil
         prompt = Self.promptWindow()
         log?.write("watching for 1Password prompts (\(reason)); prompt window: \(Self.describe(prompt))")
         layout()
@@ -76,6 +80,8 @@ final class AuthContextPanel: AuthPromptObserver {
     /// Visible only while a prompt is on screen to frame.
     private func layout() {
         guard let panel else { return }
+        if Chime.rings(forPromptBy: prompt?.owner, after: framedOwner) { Chime.play() }
+        framedOwner = prompt?.owner
         guard let prompt else {
             panel.orderOut(nil)
             return

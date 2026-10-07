@@ -99,9 +99,7 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
         }
         // Take focus so the request can't be missed. GuardedPanel ignores the keyboard, so
         // typing that lands here does nothing.
-        NSApp.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
-        Chime.play()
+        panel.presentForAnswer()
         panel.ignoreMouse(for: GuardedPanel.clickGuard)
         self.panel = panel
         listen(with: context)

@@ -11,3 +11,12 @@ extension Chime {
         sound.play()
     }
 }
+
+extension NSWindow {
+    /// How opProxy puts a window that needs an answer in front of you: it takes focus and chimes.
+    func presentForAnswer() {
+        NSApp.activate(ignoringOtherApps: true)
+        makeKeyAndOrderFront(nil)
+        Chime.play()
+    }
+}
