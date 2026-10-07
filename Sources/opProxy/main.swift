@@ -78,6 +78,7 @@ case "daemon":
     let authContext = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? AuthContextPanel(expiresIn: AuthWindow.hardCap, log: log) : nil
     auth.promptObserver = authContext
     do { try daemon.start() } catch { fail("could not start: \(error)") }
+    feed.authStatus = { (auth.current, auth.isRefreshing) }
     do { try feed.start() } catch { log.write("could not start the approval feed: \(error)") }
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)

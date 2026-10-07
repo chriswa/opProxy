@@ -27,6 +27,10 @@ final class ApprovalFeed {
     private var pairing = false
     private var announcedKeys: [String] = []
     private var keyWatch: DispatchSourceTimer?
+    /// The 1Password authorization and whether its prompt may be up; set before `start()`.
+    var authStatus: (() -> (window: AuthWindow, prompting: Bool))?
+    private var status: FeedStatus?
+    private var lostSince = Date()
 
     private struct Item {
         let id: String
@@ -71,9 +75,13 @@ final class ApprovalFeed {
             }
         }
         // `opProxy unpair` edits the file from another process; tell clients when keys change.
+        // The authorization is polled here too, which also catches it passing the 12-hour cap.
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 5, repeating: 5)
-        timer.setEventHandler { [weak self] in self?.announceKeysIfChanged() }
+        timer.setEventHandler { [weak self] in
+            self?.announceKeysIfChanged()
+            self?.announceStatusIfChanged()
+        }
         timer.resume()
         keyWatch = timer
     }
@@ -235,6 +243,21 @@ final class ApprovalFeed {
         broadcast(hello())
     }
 
+    // MARK: Status
+
+    private func statusMessage(_ status: FeedStatus) -> [String: Any] { ["type": "status", "status": status.json] }
+
+    private func announceStatusIfChanged() {
+        guard let authStatus else { return }
+        let (window, prompting) = authStatus()
+        let now = Date()
+        if status?.ok == true, window.remaining(at: now) == nil { lostSince = now }
+        let next = FeedStatus(window, prompting: prompting, lostSince: lostSince, now: now)
+        guard next != status else { return }
+        status = next
+        broadcast(statusMessage(next))
+    }
+
     // MARK: Connections
 
     private func serve(_ fd: Int32) {
@@ -244,6 +267,8 @@ final class ApprovalFeed {
             announceKeysIfChanged()
             clients[client] = fd
             send(client, hello())
+            announceStatusIfChanged()
+            if let status { send(client, statusMessage(status)) }
             send(client, ["type": "snapshot", "items": items.values.sorted { $0.createdAt < $1.createdAt }.map(json)])
             Thread.detachNewThread { [self] in
                 let reader = LineReader(fd: fd, limit: 1 << 20)

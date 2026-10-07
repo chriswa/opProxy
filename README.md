@@ -59,6 +59,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 
 Every request that would show the dialog is also published on a feed socket, `~/.opProxy/approval-feed.sock`, which Spaceterm relays to its iPhone app. The protocol is `~/spaceterm/APPROVAL_FEED.md`.
 
+- **The authorization on the phone.** The feed also reports whether 1Password has authorized opProxy and until when, so the phone shows the time left on its bottom bar, and a notification when the authorization is lost.
 - **The same chime.** A new request rings the phone with the dialog's chime while Spaceterm is open on it.
 - **Same options as the desktop.** The phone shows what the dialog shows (the item, the request, the `op` command, the agent's shell command and last message, PIDs and directory) and offers the same choices as one list: **Once**, then **1 Day** and **Forever**, each for this agent or all agents, for agents; **Once · This Terminal Tab** for terminals.
 - **The first answer wins.** The dialog and the phone ask at the same time. Answer on either and the other one goes away; a late answer from the other side is refused. A request leaves the phone when it's answered anywhere or times out, and its countdown on the phone starts when its dialog appears on the Mac.

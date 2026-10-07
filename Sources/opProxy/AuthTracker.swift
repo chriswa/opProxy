@@ -49,6 +49,8 @@ final class AuthTracker {
     }
 
     var current: AuthWindow { lock.withLock { window } }
+    /// A refresh is waiting on 1Password, whose prompt may be on screen.
+    var isRefreshing: Bool { lock.withLock { refreshing } }
 
     func startPolling() {
         let timer = DispatchSource.makeTimerSource(queue: .global())

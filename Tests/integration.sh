@@ -248,6 +248,16 @@ ask() { # session, then the phone's arguments; leaves the request's output in $W
   res=$(phone "$@"); wait $apid; asked_rc=$?
 }
 start_daemon denied 30
+check "feed: reports the 1Password authorization on connect" python3 -c "
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10); s.connect(sys.argv[1])
+f = s.makefile()
+for line in f:
+    m = json.loads(line)
+    if m['type'] == 'status': break
+st = m['status']
+assert st['label'] == '1Password' and isinstance(st['ok'], bool) and st['since'] > 0, st
+assert ('until' in st) == st['ok'] and ('title' in st) != st['ok'], st" "$FEED"
 ask sess-P approve once --doc "$WORK/phone-doc.json"
 check "phone once: reply accepted" [ "$res" = '{"id":"'"$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$res")"'","ok":true,"type":"reply-result"}' ]
 check "phone once: request ran" via_daemon "$(cat "$WORK/asked")"
