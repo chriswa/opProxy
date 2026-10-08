@@ -198,7 +198,10 @@ struct RequestView: View {
                 }
             }
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 16)
+        // Nothing below but the home indicator's own margin.
+        .padding(.bottom, 2)
         .background(Theme.surface)
         .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
