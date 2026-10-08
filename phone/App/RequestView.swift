@@ -70,23 +70,34 @@ struct RequestView: View {
 
     private func header(_ doc: FeedDocument, tone: Color) -> some View {
         VStack(alignment: .leading, spacing: 48) {
-            HStack(alignment: .top, spacing: 12) {
-                RobotIcon(color: tone).frame(width: Self.iconWidth, height: Self.iconWidth).padding(.top, 24)
-                    .anchorPreference(key: IconBounds.self, value: .bounds) { ["robot": $0] }
-                VStack(alignment: .leading, spacing: 3) {
-                    // Which Mac, for a phone paired with several.
-                    Text(request.macName).font(.footnote.weight(.medium)).foregroundStyle(Theme.dim)
-                    Text(doc.requester?.name ?? doc.subtitle ?? "Someone")
-                        .font(.system(size: 30, weight: .bold))
-                        .lineLimit(2)
-                    ForEach([doc.requester?.detail, doc.requester?.context].compactMap { $0 }, id: \.self) { line in
-                        Text(line).font(.subheadline).foregroundStyle(Theme.dim).lineLimit(2)
+            // The Mac, when there's more than one to tell apart, and the agent on it.
+            VStack(alignment: .leading, spacing: 14) {
+                if model.pairedMacs.count > 1 {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "laptopcomputer")
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(tone)
+                            .frame(width: Self.iconWidth, height: Self.iconWidth)
+                            .padding(.top, 4)
+                        Text(request.macName).font(.system(size: 30, weight: .bold)).lineLimit(1).minimumScaleFactor(0.7)
                     }
                 }
-                .anchorPreference(key: IconBounds.self, value: .bounds) { ["requester": $0] }
-                Spacer(minLength: 0)
-                if waiting > 0 {
-                    Text("\(waiting) more").font(.footnote.monospacedDigit()).foregroundStyle(Theme.dim).padding(.top, 8)
+                HStack(alignment: .top, spacing: 12) {
+                    RobotIcon(color: tone).frame(width: Self.iconWidth, height: Self.iconWidth).padding(.top, 4)
+                        .anchorPreference(key: IconBounds.self, value: .bounds) { ["robot": $0] }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(doc.requester?.name ?? doc.subtitle ?? "Someone")
+                            .font(.system(size: 30, weight: .bold))
+                            .lineLimit(2)
+                        ForEach([doc.requester?.detail, doc.requester?.context].compactMap { $0 }, id: \.self) { line in
+                            Text(line).font(.subheadline).foregroundStyle(Theme.dim).lineLimit(2)
+                        }
+                    }
+                    .anchorPreference(key: IconBounds.self, value: .bounds) { ["requester": $0] }
+                    Spacer(minLength: 0)
+                    if waiting > 0 {
+                        Text("\(waiting) more").font(.footnote.monospacedDigit()).foregroundStyle(Theme.dim).padding(.top, 8)
+                    }
                 }
             }
             HStack(alignment: .top, spacing: 12) {
