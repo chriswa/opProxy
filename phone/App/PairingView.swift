@@ -66,7 +66,7 @@ struct PairingView: View {
     /// While pairing: only the step it's on, and the fingerprint the Mac will ask about.
     @ViewBuilder private var pairing: some View {
         Text("Pairing…").font(.largeTitle.weight(.bold))
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
             ProgressView().tint(Theme.text)
             Text(progress ?? "Starting…").font(.title3).fixedSize(horizontal: false, vertical: true)
         }

@@ -54,7 +54,8 @@ final class FeedModel: ObservableObject {
     @Published private(set) var held: QueuedRequest?
     /// Stuck requests set aside on this phone.
     @Published private(set) var dismissed: Set<String> = []
-    /// Moves on as time passes, so stuck Macs are noticed without a change in iCloud.
+    /// Moves on as time passes, so stuck Macs and expired requests are noticed without a
+    /// change in iCloud.
     @Published private var now = Date()
 
     /// The Macs this phone was paired with when the app last ran, by zone name, so it opens on
@@ -74,7 +75,8 @@ final class FeedModel: ObservableObject {
         let all = macs.values.filter(\.paired).flatMap { mac in
             mac.items.map { QueuedRequest(mac: mac.zoneID, macName: mac.displayName, item: $0, stuck: mac.stuck(at: now)) }
         }
-        return all.filter { !dismissed.contains($0.id) }.sorted { a, b in
+        // A request past its deadline has timed out on the Mac, or will when it wakes.
+        return all.filter { !dismissed.contains($0.id) && ($0.item.expires.map { $0 > now } ?? true) }.sorted { a, b in
             a.stuck != b.stuck ? !a.stuck : a.item.createdAt < b.item.createdAt
         }
     }
@@ -105,6 +107,8 @@ final class FeedModel: ObservableObject {
     private var subscribed: Set<String> = []
     private var refreshing = false
     private var poller: Task<Void, Never>?
+    /// Keeps `now` current to the second, so a request leaves as its countdown reaches 0:00.
+    private var ticker: Task<Void, Never>?
 
     // MARK: Polling
 
@@ -120,9 +124,16 @@ final class FeedModel: ObservableObject {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                 }
             }
+            ticker = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    self?.now = Date()
+                }
+            }
         } else {
             poller?.cancel()
-            poller = nil
+            ticker?.cancel()
+            (poller, ticker) = (nil, nil)
             // What's on screen may be stale by the time the app is back: fetch before
             // claiming nothing is pending.
             update(\.loaded, false)
