@@ -88,6 +88,30 @@ final class FeedModel: ObservableObject {
         update(\.rememberedMacs, Dictionary(uniqueKeysWithValues: pairedMacs.map { ($0.zoneID.zoneName, $0.displayName) }))
     }
 
+    // MARK: Demo
+
+    /// Showing the pretend Mac in place of real ones.
+    @Published private(set) var demo = false
+    private var demoCount = 0
+
+    func startDemo() {
+        demo = true
+        macs = [Demo.zone.zoneName: Demo.mac()]
+        loaded = true
+    }
+
+    func addDemoRequest() {
+        demoCount += 1
+        updateMac(Demo.zone) { $0.items.append(Demo.request(number: demoCount)) }
+    }
+
+    func exitDemo() {
+        demo = false
+        (macs, held, databaseToken, zoneTokens, subscribed) = ([:], nil, nil, [:], [])
+        loaded = false
+        Task { await refresh() }
+    }
+
     /// This app's version, which every paired Mac's should match.
     nonisolated static var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -202,6 +226,8 @@ final class FeedModel: ObservableObject {
     /// Fetches what changed: first which zones changed, across the database, then each of
     /// those zones' records.
     func refresh() async {
+        // The demo's pretend Mac has nothing to fetch, and is always up to date.
+        if demo { return update(\.loaded, true) }
         guard !refreshing else { return }
         refreshing = true
         defer {
@@ -364,6 +390,12 @@ final class FeedModel: ObservableObject {
     }
 
     func answer(_ request: QueuedRequest, action: String, picks: [String: String]) async -> String? {
+        if demo {
+            // The pretend Mac takes a moment, as a real one would.
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            updateMac(request.mac) { mac in mac.items.removeAll { $0.id == request.item.id } }
+            return nil
+        }
         do {
             let message = try FeedReply.message(item: request.item, action: action, picks: picks, keyId: PhoneKey.keyId,
                                                 sign: PhoneKey.sign)
@@ -378,6 +410,10 @@ final class FeedModel: ObservableObject {
     /// Forgets a Mac: deletes its zone, which ends that Mac's access (it drops the link when
     /// it next looks). Other Macs are untouched.
     func unpair(_ mac: MacFeed) async -> String? {
+        if demo {
+            exitDemo()
+            return nil
+        }
         do {
             _ = try await db.deleteRecordZone(withID: mac.zoneID)
         } catch let error as CKError where error.code == .zoneNotFound {

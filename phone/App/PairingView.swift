@@ -61,6 +61,14 @@ struct PairingView: View {
             .padding(.top, 8)
         }
         .foregroundStyle(Theme.dim)
+        // For trying the app without a Mac (App Review, say): only before anything is paired.
+        if onPaired == nil {
+            Button("No Mac yet? Try a demo") { model.startDemo() }
+                .font(.footnote)
+                .foregroundStyle(Theme.dim)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
+        }
     }
 
     /// While pairing: only the step it's on, and the fingerprint the Mac will ask about.

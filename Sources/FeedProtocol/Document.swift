@@ -104,6 +104,10 @@ public struct FeedProviderStatus: Decodable, Equatable {
     public let title: String?
     public let detail: String?
 
+    public init(ok: Bool, label: String?, since: Double, until: Double?, title: String?, detail: String?) {
+        (self.ok, self.label, self.since, self.until, self.title, self.detail) = (ok, label, since, until, title, detail)
+    }
+
     public var untilDate: Date? { until.map { Date(timeIntervalSince1970: $0 / 1000) } }
 }
 

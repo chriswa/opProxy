@@ -58,19 +58,30 @@ private struct EmptyQueue: View {
     var body: some View {
         VStack(spacing: 0) {
             CautionStripe(tone: Theme.tone(nil)).frame(height: 8).opacity(0.5)
-            ContentUnavailableView("No pending requests", systemImage: "checkmark.shield",
-                                   description: Text("When an agent asks for a secret, it shows up here."))
+            ContentUnavailableView {
+                Label("No pending requests", systemImage: "checkmark.shield")
+            } description: {
+                Text(model.demo ? "This is a demo with a pretend Mac. Make a sample request to see how answering works."
+                     : "When an agent asks for a secret, it shows up here.")
+            } actions: {
+                if model.demo {
+                    Button("Create a sample request") { model.addDemoRequest() }.buttonStyle(FilledButton())
+                    Button("Exit demo") { model.exitDemo() }.font(.subheadline).foregroundStyle(Theme.dim)
+                }
+            }
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(model.pairedMacs.filter(\.mismatched), id: \.zoneID) { VersionWarning(mac: $0) }
                 Text("Paired Macs").font(.footnote.weight(.semibold)).foregroundStyle(Theme.dim)
                 ForEach(model.pairedMacs, id: \.zoneID) { MacRow(mac: $0) }
-                Button {
-                    pairing = true
-                } label: {
-                    Label("Pair another Mac", systemImage: "plus").font(.subheadline)
+                if !model.demo {
+                    Button {
+                        pairing = true
+                    } label: {
+                        Label("Pair another Mac", systemImage: "plus").font(.subheadline)
+                    }
+                    .foregroundStyle(Theme.tone(nil))
+                    .padding(.top, 4)
                 }
-                .foregroundStyle(Theme.tone(nil))
-                .padding(.top, 4)
                 Text("Secret Proxy \(FeedModel.appVersion)").font(.caption2).foregroundStyle(Theme.dim).padding(.top, 6)
             }
             .padding(16)
