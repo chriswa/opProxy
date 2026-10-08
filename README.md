@@ -3,7 +3,7 @@
 A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. When an agent asks for a secret, a dialog shows you the item, who is asking and why, and you answer there or on a paired iPhone running Secret Proxy, opProxy's iPhone app. Allow it just this once, so you're asked every time, or let that agent, or every agent, read that item for a day or for good.
 
 > [!WARNING]
-> **opProxy lets listings through without asking.** Commands like `item list` and `vault list` return no secrets, so they always run. They do reveal your vaults' metadata to anything that can run `op`, whether an agent, a script or someone at a terminal: each item's title, vault, category, website addresses, when it was created and last edited and by whom, and 1Password's one-line summary of it (for a login, the username), plus your vault names and your account's email and sign-in address.
+> **opProxy lets listings through without asking.** Commands like `item list` and `vault list` return no secrets, so they always run. They do reveal your vaults' metadata to anything that can run `op`, whether an agent, a script or someone at a terminal: each item's title, vault, category, website addresses, when it was created and last edited and by whom, and 1Password's one-line summary of it (for a login, the username). Your vault names are visible too (`vault list`), as are your account's email and sign-in address (`whoami`, `account list`).
 >
 > That's deliberate. Agents need to see what's there to know which item to ask for. opProxy uses the same list to tie each approval to an item's ID rather than to the wording of a command, so one approval covers an item however it's asked for, instead of prompting again for every variation.
 >
