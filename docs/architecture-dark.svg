@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1010" width="800" height="1010" font-family="-apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, Helvetica, Arial, sans-serif" role="img" aria-label="opProxy architecture">
+<defs>
+<pattern id="haz" width="22" height="22" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="22" height="22" fill="#14120E"/><rect width="11" height="22" fill="#FACC14"/></pattern>
+<marker id="m-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#BDB39E"/></marker>
+<marker id="m-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#FACC14"/></marker>
+<marker id="m-grn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7FC765"/></marker>
+<marker id="m-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#EF675C"/></marker>
+</defs>
+<rect width="800" height="1010" rx="16" fill="#1F1B14"/>
+<clipPath id="top"><rect width="800" height="1010" rx="16"/></clipPath>
+<rect width="800" height="12" fill="url(#haz)" clip-path="url(#top)"/>
+<rect x="192" y="40" width="252" height="70" rx="12" fill="#2B2619" stroke="#4A4232" stroke-width="1.5"/>
+<text x="318" y="70.0" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="middle">AI agent</text>
+<text x="318" y="93.0" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">Claude Code, Codex, Cursor</text>
+<path d="M318,110 L318,158" fill="none" stroke="#BDB39E" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-dim)"/>
+<text x="332" y="140" font-size="15" font-weight="400" fill="#F7F2E8" text-anchor="start" font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">op …</text>
+<rect x="192" y="160" width="252" height="70" rx="12" fill="#2B2619" stroke="#4A4232" stroke-width="1.5"/>
+<text x="318" y="189" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="middle"><tspan font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">op</tspan> shim</text>
+<text x="318" y="212" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">opProxy's, first on PATH</text>
+<path d="M318,230 L318,278" fill="none" stroke="#BDB39E" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-dim)"/>
+<rect x="192" y="280" width="252" height="70" rx="12" fill="#2B2619" stroke="#4A4232" stroke-width="1.5"/>
+<text x="318" y="310.0" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="middle">opProxy daemon</text>
+<text x="318" y="333.0" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">on your Mac, sorts the command</text>
+<rect x="508" y="272" width="268" height="86" rx="12" fill="#1F1B14" stroke="#4A4232" stroke-width="1.5" stroke-dasharray="5 5"/>
+<text x="524" y="300" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">Writes and anything else</text>
+<text x="524" y="322" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">go to the real <tspan font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">op</tspan>, which</text>
+<text x="524" y="344" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">asks 1Password itself</text>
+<path d="M444,315 L506,315" fill="none" stroke="#BDB39E" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 5" marker-end="url(#m-dim)"/>
+<path d="M318,350 L318,418" fill="none" stroke="#FACC14" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-acc)"/>
+<text x="332" y="377" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">can reveal a secret</text>
+<text x="332" y="400" font-size="14.5" font-weight="400" fill="#F7F2E8" text-anchor="start" font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">read · item get · document get</text>
+<path d="M192,315 L108,315 Q96,315 96,327 L96,446" fill="none" stroke="#7FC765" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-grn)"/>
+<rect x="24" y="448" width="144" height="140" rx="12" fill="#1F2A17" stroke="#7FC765" stroke-width="1.5"/>
+<text x="96" y="476" font-size="16" font-weight="600" fill="#7FC765" text-anchor="middle">Lists only</text>
+<text x="96" y="498" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">always allowed</text>
+<text x="96" y="528" font-size="14.5" font-weight="400" fill="#F7F2E8" text-anchor="middle" font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">item list</text>
+<text x="96" y="549" font-size="14.5" font-weight="400" fill="#F7F2E8" text-anchor="middle" font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">vault list</text>
+<text x="96" y="570" font-size="14.5" font-weight="400" fill="#F7F2E8" text-anchor="middle" font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">whoami</text>
+<path d="M96,588 L96,830 Q96,842 108,842 L190,842" fill="none" stroke="#7FC765" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-grn)"/>
+<rect x="192" y="420" width="252" height="180" rx="12" fill="#2E2812" stroke="#FACC14" stroke-width="2"/>
+<text x="318" y="450" font-size="17" font-weight="600" fill="#FACC14" text-anchor="middle">Remembered approvals</text>
+<text x="318" y="478" font-size="15" font-weight="400" fill="#F7F2E8" text-anchor="middle">one item, for one agent</text>
+<text x="318" y="500" font-size="15" font-weight="400" fill="#F7F2E8" text-anchor="middle">or for all agents</text>
+<text x="318" y="522" font-size="15" font-weight="400" fill="#F7F2E8" text-anchor="middle">expires in 1 day, or never</text>
+<text x="318" y="554" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">signed by the Mac’s Secure</text>
+<text x="318" y="576" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">Enclave or a paired phone</text>
+<line x1="216" y1="538" x2="420" y2="538" stroke="#FACC14" stroke-opacity="0.35"/>
+<rect x="508" y="420" width="268" height="324" rx="12" fill="#2B2619" stroke="#4A4232" stroke-width="1.5"/>
+<text x="526" y="450" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="start">Ask you</text>
+<text x="526" y="476" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">Mac dialog and paired iPhones</text>
+<text x="526" y="498" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">(Secret Proxy app) at once;</text>
+<text x="526" y="520" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">the first answer wins</text>
+<rect x="520" y="542" width="244" height="56" rx="8" fill="#2E2812"/>
+<rect x="520" y="542" width="4" height="56" rx="2" fill="#FACC14"/>
+<text x="538" y="566" font-size="16" font-weight="600" fill="#FACC14" text-anchor="start">1 day or forever</text>
+<text x="538" y="587" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">this agent or all agents</text>
+<rect x="520" y="608" width="244" height="56" rx="8" fill="#1F2A17"/>
+<rect x="520" y="608" width="4" height="56" rx="2" fill="#7FC765"/>
+<text x="538" y="632" font-size="16" font-weight="600" fill="#7FC765" text-anchor="start">Allow once</text>
+<text x="538" y="653" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">nothing saved, asked again</text>
+<rect x="520" y="674" width="244" height="56" rx="8" fill="#2E1A16"/>
+<rect x="520" y="674" width="4" height="56" rx="2" fill="#EF675C"/>
+<text x="538" y="698" font-size="16" font-weight="600" fill="#EF675C" text-anchor="start">Deny</text>
+<text x="538" y="719" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">or no answer in 5 minutes</text>
+<path d="M444,446 L506,446" fill="none" stroke="#FACC14" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-acc)"/>
+<text x="476.0" y="438" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">no</text>
+<path d="M520,570 L446,570" fill="none" stroke="#FACC14" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-acc)"/>
+<text x="476.0" y="562" font-size="15" font-weight="400" fill="#FACC14" text-anchor="middle">saved</text>
+<path d="M520,636 L392,636 Q380,636 380,648 L380,798" fill="none" stroke="#7FC765" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-grn)"/>
+<path d="M278,600 L278,798" fill="none" stroke="#7FC765" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-grn)"/>
+<text x="266" y="690" font-size="15" font-weight="400" fill="#7FC765" text-anchor="end">match,</text>
+<text x="266" y="712" font-size="15" font-weight="400" fill="#7FC765" text-anchor="end">not expired</text>
+<path d="M642,744 L642,790" fill="none" stroke="#EF675C" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-red)"/>
+<rect x="580" y="792" width="124" height="42" rx="21" fill="#2E1A16" stroke="#EF675C" stroke-width="1.5"/>
+<text x="642" y="818" font-size="16" font-weight="600" fill="#EF675C" text-anchor="middle">Refused</text>
+<rect x="192" y="800" width="252" height="84" rx="12" fill="#2B2619" stroke="#4A4232" stroke-width="1.5"/>
+<text x="318" y="826.0" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="middle">1Password CLI</text>
+<text x="318" y="849.0" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">in opProxy’s own</text>
+<text x="318" y="872.0" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">authorized session</text>
+<path d="M318,884 L318,920" fill="none" stroke="#BDB39E" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-dim)"/>
+<path d="M218,930 L218,988 A100,10 0 0 0 418,988 L418,930" fill="#2B2619" stroke="#4A4232" stroke-width="1.5"/>
+<ellipse cx="318" cy="930" rx="100" ry="10" fill="#14120E" stroke="#4A4232" stroke-width="1.5"/>
+<text x="318" y="970" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="middle">1Password</text>
+</svg>

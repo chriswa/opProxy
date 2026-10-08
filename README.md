@@ -26,23 +26,12 @@ A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI 
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    agent["AI agent<br/>Claude Code, Codex, Cursor"] -->|"op …"| shim["op<br/>(opProxy's shim, first on PATH)"]
-    shim --> daemon["opProxy daemon"]
-    daemon -->|"list, whoami, vault list…<br/>no secret values: always allowed"| op["1Password CLI<br/>in opProxy's authorized session"]
-    daemon -->|"read, item get, document get<br/>reveals a secret"| check{"Allowed already?"}
-    check -->|"yes, and not expired"| op
-    check -->|"no"| ask["Ask you<br/>Mac dialog (Touch ID) and paired iPhones"]
-    ask -->|"Deny, or no answer in 5 minutes"| refused["Refused"]
-    ask -->|"Allow: Once"| op
-    ask -->|"Allow: 1 Day or Forever<br/>for this agent or all agents"| store[("Approvals<br/>agent or all agents · item · expiry<br/>signed by the Mac's Secure Enclave or the phone")]
-    store --> check
-    store --> op
-    op --> vault[("1Password")]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.svg">
+  <img src="docs/architecture-light.svg" alt="An agent's op command reaches opProxy's shim and daemon; listing commands go straight to the 1Password CLI, while secret reads run only if a remembered approval matches or you allow them on your Mac or iPhone, and denied or unanswered requests are refused." width="100%">
+</picture>
 
-Writes and anything opProxy doesn't recognise go straight to the real `op`, which asks 1Password itself. An approval covers one item, every field of it, through `read`, `item get` or `document get`, until it expires or you revoke it from the menu.
+Commands that only list things, such as `item list`, `vault list` and `whoami`, are always allowed, with no dialog. That's a trade-off: they return no secret values, but they do show item titles, vault names, URLs and usernames, which some people consider sensitive too. Writes and anything opProxy doesn't recognise go straight to the real `op`, which asks 1Password itself. An approval covers one item, every field of it, through `read`, `item get` or `document get`, until it expires or you revoke it from the menu.
 
 ## How it works
 
