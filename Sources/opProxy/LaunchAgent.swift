@@ -77,7 +77,7 @@ enum LaunchAgent {
     /// Opening opProxy.app (Finder, `open`): installs the agent if this Mac has none (or its
     /// program is gone), starts the daemon if it isn't running, and has it show Setup.
     static func startFromAppLaunch(paths: Paths, executable: String) -> Never {
-        Setup.linkCommands(to: executable)
+        Setup.linkCommands(to: executable, paths: paths)
         if installedProgram.map({ !FileManager.default.fileExists(atPath: $0) }) ?? true {
             do { try install(executable: executable, paths: paths) } catch { fail("could not install the background agent: \(error)") }
         } else if UnixSocket.connect(path: paths.socket.path).map({ close($0) }) == nil {

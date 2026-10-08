@@ -180,7 +180,7 @@ case "unpair":
 case "install-agent":
     // install.sh: what opening the app does on a Mac with no agent yet.
     guard let executable = Bundle.main.executablePath else { fail("cannot find my own executable") }
-    Setup.linkCommands(to: executable)
+    Setup.linkCommands(to: executable, paths: paths)
     do { try LaunchAgent.install(executable: executable, paths: paths) } catch { fail("could not install the background agent: \(error)") }
 
 case "setup":

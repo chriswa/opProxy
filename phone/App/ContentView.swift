@@ -52,6 +52,7 @@ struct ContentView: View {
             CautionStripe(tone: Theme.tone(nil)).frame(height: 8).opacity(0.5)
             ContentUnavailableView("No pending requests", systemImage: "checkmark.shield",
                                    description: Text("When an agent asks for a secret, it shows up here."))
+            UnpairButton()
             StatusBar()
         }
         .background(Theme.background)
@@ -100,5 +101,29 @@ private struct StatusBar: View {
             .frame(maxWidth: .infinity)
             .padding(10)
             .background(Theme.surface)
+    }
+}
+
+/// Forgets the Mac, so this phone can pair again, with this or another Mac.
+private struct UnpairButton: View {
+    @EnvironmentObject private var model: FeedModel
+    @State private var asking = false
+    @State private var error: String?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            if let error { Text(error).font(.footnote).foregroundStyle(Theme.danger) }
+            Button("Unpair from the Mac") { asking = true }
+                .font(.footnote)
+                .foregroundStyle(Theme.dim)
+        }
+        .padding(.bottom, 12)
+        .confirmationDialog("Unpair from the Mac?", isPresented: $asking, titleVisibility: .visible) {
+            Button("Unpair", role: .destructive) {
+                Task { error = await model.unpair() }
+            }
+        } message: {
+            Text("Requests stop coming to this phone until you pair it again.")
+        }
     }
 }

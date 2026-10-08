@@ -6,12 +6,13 @@ import SwiftUI
 /// shell that finds opProxy's `op` first, and optionally a paired iPhone. Opening the app shows
 /// it, as does the menu's Setup….
 enum Setup {
-    /// Where opening the app puts `op` and `opProxy`, for shells to find.
-    static var binDir: URL { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".opProxy/bin") }
+    /// Where opening the app puts `op` and `opProxy`, for shells to find: `~/.opProxy/bin`.
+    static func binDir(_ paths: Paths) -> URL { paths.stateDir.appendingPathComponent("bin") }
 
-    /// Points `~/.opProxy/bin/op` and `opProxy` at `executable`.
-    static func linkCommands(to executable: String) {
+    /// Points `op` and `opProxy` in `binDir` at `executable`.
+    static func linkCommands(to executable: String, paths: Paths) {
         let fm = FileManager.default
+        let binDir = binDir(paths)
         try? fm.createDirectory(at: binDir, withIntermediateDirectories: true)
         for name in ["op", "opProxy"] {
             let link = binDir.appendingPathComponent(name)
@@ -41,11 +42,19 @@ enum Setup {
         return path.isEmpty ? nil : URL(fileURLWithPath: path).resolvingSymlinksInPath().path
     }
 
-    static let pathLine = #"export PATH="$HOME/.opProxy/bin:$PATH""#
+    /// The line that puts `binDir` first on PATH.
+    static func pathLine(_ paths: Paths) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let dir = binDir(paths).path
+        return #"export PATH=""# + (dir.hasPrefix(home + "/") ? "$HOME" + dir.dropFirst(home.count) : dir) + #":$PATH""#
+    }
 
-    /// Puts `~/.opProxy/bin` first on PATH for new shells. It goes at the end of both files, so
-    /// it comes after anything else that prepends (Homebrew's shellenv, for one).
-    static func addToShell() throws {
+    /// Links `op` and `opProxy` to `executable` and puts them first on PATH for new shells. The
+    /// line goes at the end of both files, so it comes after anything else that prepends
+    /// (Homebrew's shellenv, for one).
+    static func addToShell(executable: String, paths: Paths) throws {
+        linkCommands(to: executable, paths: paths)
+        let pathLine = pathLine(paths)
         let home = FileManager.default.homeDirectoryForCurrentUser
         for name in [".zprofile", ".zshrc"] {
             let file = home.appendingPathComponent(name)
@@ -109,7 +118,9 @@ private struct SetupView: View {
                     : "New terminals run \(shellOp ?? "no op at all"). opProxy adds ~/.opProxy/bin to the start of your PATH in ~/.zprofile and ~/.zshrc. Agents already running keep their old PATH until restarted.") {
                 if !shellReady {
                     Button("Add to my shell") {
-                        do { try Setup.addToShell(); check() } catch { self.error = "Couldn't update your shell files: \(error)" }
+                        do { try Setup.addToShell(executable: executable, paths: paths); check() } catch {
+                            self.error = "Couldn't update your shell files: \(error)"
+                        }
                     }
                 }
             }

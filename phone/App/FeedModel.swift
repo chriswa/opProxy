@@ -248,6 +248,22 @@ final class FeedModel: ObservableObject {
 
     // MARK: Pairing
 
+    /// Forgets the Mac: deletes this phone's zone, which ends the Mac's access to it (the Mac
+    /// drops the link when it next looks), and starts over on the pairing screen.
+    func unpair() async -> String? {
+        do {
+            _ = try await db.deleteRecordZone(withID: zoneID)
+        } catch let error as CKError where error.code == .zoneNotFound {
+            // Already gone.
+        } catch {
+            return Self.describe(error)
+        }
+        (ready, subscribed, token, helloWrittenAt) = (false, false, nil, nil)
+        update(\.items, [])
+        update(\.pairedKeys, nil)
+        return nil
+    }
+
     /// Shares the zone with the Mac whose QR code was scanned, waits for it to join, then asks
     /// it to trust this phone's key. Returns nil once paired, else why not.
     func pair(qr: String, progress: @escaping (String) -> Void) async -> String? {
