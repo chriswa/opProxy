@@ -3,7 +3,11 @@
 A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. When an agent asks for a secret, a dialog shows you the item, who is asking and why, and you answer there or on a paired iPhone running Secret Proxy, opProxy's iPhone app. Allow it just this once, so you're asked every time, or let that agent, or every agent, read that item for a day or for good.
 
 > [!WARNING]
-> opProxy is opinionated about discovery: commands that only list things (`item list`, `vault list` and the like) always run, without asking. They return no secret values, but they do let anything that runs `op` (an agent, a script, anyone at a terminal) see the metadata in your vaults: every item's title, the vault it's in, its category, 1Password's one-line summary of it (for a login, the username), its website addresses, when it was created and last changed, and who last edited it, as well as your vault names and your account's email and sign-in address. Agents need these listings to work out which item to ask for. opProxy reads the same listing itself to tie each approval to an item's ID rather than to how a command happened to spell it, so one approval covers that item however it's asked for, instead of a new prompt for every variation of the command. If that concerns you, don't use opProxy yet; a setting to ask for these too is planned.
+> **opProxy lets listings through without asking.** Commands like `item list` and `vault list` return no secrets, so they always run. They do reveal your vaults' metadata to anything that can run `op`, whether an agent, a script or someone at a terminal: each item's title, vault, category, website addresses, when it was created and last edited and by whom, and 1Password's one-line summary of it (for a login, the username), plus your vault names and your account's email and sign-in address.
+>
+> That's deliberate. Agents need to see what's there to know which item to ask for. opProxy uses the same list to tie each approval to an item's ID rather than to the wording of a command, so one approval covers an item however it's asked for, instead of prompting again for every variation.
+>
+> If exposing that metadata worries you, hold off on opProxy until there's a setting to ask before listings too.
 
 ## Why
 
