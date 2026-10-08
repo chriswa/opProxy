@@ -74,11 +74,13 @@ enum LaunchAgent {
         for _ in 0..<50 where !FileManager.default.fileExists(atPath: paths.socket.path) { usleep(100_000) }
     }
 
-    /// Opening opProxy.app (Finder, `open`): installs the agent if this Mac has none (or its
-    /// program is gone), starts the daemon if it isn't running, and has it show Setup.
+    /// Opening opProxy.app (Finder, `open`): makes this copy the one that runs, installing its
+    /// agent unless the installed one already runs this copy, starts the daemon if it isn't
+    /// running, and has it show Setup. Opening a newer copy so replaces an older install.
     static func startFromAppLaunch(paths: Paths, executable: String) -> Never {
         Setup.linkCommands(to: executable, paths: paths)
-        if installedProgram.map({ !FileManager.default.fileExists(atPath: $0) }) ?? true {
+        let mine = URL(fileURLWithPath: executable).resolvingSymlinksInPath().path
+        if installedProgram.map({ URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }) != mine {
             do { try install(executable: executable, paths: paths) } catch { fail("could not install the background agent: \(error)") }
         } else if UnixSocket.connect(path: paths.socket.path).map({ close($0) }) == nil {
             if launchctl(["kickstart", "\(domain)/\(label)"]).status != 0 { launchctl(["bootstrap", domain, plist.path]) }
