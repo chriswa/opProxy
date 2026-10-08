@@ -100,6 +100,12 @@ Every request that would show the dialog is also published for paired phones, in
 
 ## Install
 
+**From a release:** download `opProxy-<version>.zip` from the GitHub releases, move `opProxy.app` to Applications and open it. It installs its background agent, links `op` and `opProxy` in `~/.opProxy/bin`, and opens Setup, which checks for the 1Password CLI, offers to put `~/.opProxy/bin` first on your PATH in `~/.zprofile` and `~/.zshrc`, and pairs an iPhone. Setup… in the menu (or `opProxy setup`) opens it again.
+
+`scripts/release.sh <version> [--publish]` builds a release: from the committed source, signed with Developer ID and a Developer ID provisioning profile (for CloudKit), then notarized and stapled. `--publish` uploads it as a GitHub release. It needs Xcode signed in to the developer account and a `notarytool` profile named `opProxy`.
+
+**From source:**
+
 ```
 ./install.sh
 ```

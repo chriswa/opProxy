@@ -2,10 +2,13 @@
 # Signs an assembled opProxy.app. With the CloudKit profile from provision-mac.sh, it's
 # embedded and the app is signed with the profile's certificate and CloudKit entitlements;
 # without one, the app is signed as before and simply runs without the iPhone app's feed.
+# release.sh passes a Developer ID profile and its entitlements in OPPROXY_PROFILE and
+# OPPROXY_ENTITLEMENTS.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APP=$1
-PROFILE="$ROOT/.build/cloudkit/opProxy.provisionprofile"
+PROFILE=${OPPROXY_PROFILE:-$ROOT/.build/cloudkit/opProxy.provisionprofile}
+ENTITLEMENTS=${OPPROXY_ENTITLEMENTS:-$ROOT/phone/MacSigning/opProxy.entitlements}
 IDENTITIES=$(security find-identity -v -p codesigning 2>/dev/null)
 if [ -f "$PROFILE" ]; then
     # The profile names the certificates it allows; sign with the first one in the keychain.
@@ -18,8 +21,9 @@ for der in plistlib.loads(sys.stdin.buffer.read())["DeveloperCertificates"]:
     if [ -n "$IDENTITY" ]; then
         echo "signing with CloudKit: $(grep "$IDENTITY" <<<"$IDENTITIES" | awk -F'"' '{print $2}')"
         cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
-        codesign --force --sign "$IDENTITY" --options runtime \
-            --entitlements "$ROOT/phone/MacSigning/opProxy.entitlements" "$APP"
+        # Developer ID builds get a secure timestamp, which notarization requires.
+        TIMESTAMP=$(grep "$IDENTITY" <<<"$IDENTITIES" | grep -q "Developer ID" && echo --timestamp || echo --timestamp=none)
+        codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP --entitlements "$ENTITLEMENTS" "$APP"
         exit 0
     fi
     echo "the CloudKit profile's certificate isn't in this keychain; signing without CloudKit"
