@@ -18,6 +18,7 @@ enum RemoteCard {
             // themselves; `title` and `subtitle` say the same for those that don't.
             "requester": requesterBlock(prompt.requester),
             "item": ["title": prompt.target.title, "detail": "Vault: \(prompt.target.vaultName)"],
+            "context": contextBlock(prompt),
             "pickers": [[
                 "id": picker, "label": "Allow", "default": options[defaultIndex].id,
                 "options": options.map { ["id": $0.id, "label": $0.label, "hint": $0.hint, "facets": facets($0.scope)] },
@@ -46,6 +47,17 @@ enum RemoteCard {
             block["detail"] = (["Terminal tab"] + [t.info.tty].compactMap { $0 }).joined(separator: " · ")
         }
         if let title = requester.labelTitle { block["context"] = "in “\(title)”" }
+        return block
+    }
+
+    /// What the agent last said, and the exact command line that asked: what a phone shows
+    /// below who and what, in place of `sections`.
+    private static func contextBlock(_ prompt: ApprovalPrompt) -> [String: Any] {
+        var block: [String: Any] = ["command": "op " + prompt.request.argv.map(shellQuote).joined(separator: " ")]
+        if case .agent(let a) = prompt.requester {
+            if let tool = a.caller.toolCommand { block["command"] = tool }
+            if let message = a.lastMessage { block["message"] = message }
+        }
         return block
     }
 

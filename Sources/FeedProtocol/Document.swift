@@ -55,6 +55,12 @@ public struct FeedDocument: Decodable, Equatable {
         public let context: String?
     }
 
+    /// Why it's being asked: the agent's last message and the exact command line.
+    public struct Context: Decodable, Equatable {
+        public let message: String?
+        public let command: String?
+    }
+
     /// What is being asked for.
     public struct Subject: Decodable, Equatable {
         public let title: String
@@ -81,6 +87,7 @@ public struct FeedDocument: Decodable, Equatable {
     public let subtitle: String?
     public let requester: Requester?
     public let item: Subject?
+    public let context: Context?
     public let sections: [Section]?
     public let notice: String?
     public let pickers: [Picker]?

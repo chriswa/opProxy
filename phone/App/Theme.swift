@@ -9,8 +9,9 @@ enum Theme {
     static let border = Color(red: 0.96, green: 0.77, blue: 0.0).opacity(0.35)
     static let text = Color(red: 0.97, green: 0.95, blue: 0.91)
     static let dim = Color(red: 0.74, green: 0.70, blue: 0.62)
-    static let danger = Color(red: 1.0, green: 0.42, blue: 0.30)
-    static let approve = Color(red: 0.25, green: 0.78, blue: 0.42)
+    // Red and green at the hazard yellow's lightness and saturation (OKLCH), warm like the rest.
+    static let danger = Color(hex: 0xEF675C)
+    static let approve = Color(hex: 0x7FC765)
     static let stripeDark = Color(red: 0.07, green: 0.06, blue: 0.05)
 
     /// The document's tone: hazard yellow unless it says otherwise.
@@ -47,5 +48,31 @@ struct CautionStripe: View {
                 x += 20
             }
         }
+    }
+}
+
+/// A small robot head, for who is asking, beside the key for what they ask for.
+struct RobotIcon: View {
+    let color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width, h = size.height
+            // Antenna.
+            context.fill(Path(CGRect(x: w * 0.47, y: h * 0.06, width: w * 0.06, height: h * 0.16)), with: .color(color))
+            context.fill(Path(ellipseIn: CGRect(x: w * 0.41, y: 0, width: w * 0.18, height: w * 0.18)), with: .color(color))
+            // Ears.
+            context.fill(Path(roundedRect: CGRect(x: 0, y: h * 0.45, width: w * 0.1, height: h * 0.24), cornerRadius: w * 0.03),
+                         with: .color(color))
+            context.fill(Path(roundedRect: CGRect(x: w * 0.9, y: h * 0.45, width: w * 0.1, height: h * 0.24), cornerRadius: w * 0.03),
+                         with: .color(color))
+            // Head, with eyes and a mouth cut out.
+            var head = Path(roundedRect: CGRect(x: w * 0.12, y: h * 0.24, width: w * 0.76, height: h * 0.66), cornerRadius: w * 0.16)
+            head.addEllipse(in: CGRect(x: w * 0.28, y: h * 0.42, width: w * 0.14, height: w * 0.14))
+            head.addEllipse(in: CGRect(x: w * 0.58, y: h * 0.42, width: w * 0.14, height: w * 0.14))
+            head.addRoundedRect(in: CGRect(x: w * 0.34, y: h * 0.68, width: w * 0.32, height: h * 0.07), cornerSize: CGSize(width: 2, height: 2))
+            context.fill(head, with: .color(color), style: FillStyle(eoFill: true))
+        }
+        .accessibilityHidden(true)
     }
 }

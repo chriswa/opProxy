@@ -31,20 +31,24 @@ struct RequestView: View {
         let tone = Theme.tone(doc.tone)
         return VStack(spacing: 0) {
             CautionStripe(tone: tone).frame(height: 8)
-            header(doc, tone: tone)
-            Rectangle().fill(Theme.border).frame(height: 1)
+            // Everything but the answers scrolls, so a long request never crowds them out.
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 0) {
+                    header(doc, tone: tone)
                     if let notice = doc.notice {
                         Text(notice)
                             .font(.subheadline)
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(tone))
+                            .padding(.horizontal, 16)
                     }
-                    ForEach(doc.sections ?? [], id: \.self) { SectionView(section: $0) }
+                    // Well apart from who and what: there if wanted, quiet otherwise.
+                    details(doc)
+                        .padding(.top, 56)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 24)
                 }
-                .padding(16)
             }
             .scrollIndicators(.visible)
             controls(doc, tone: tone)
@@ -61,39 +65,78 @@ struct RequestView: View {
 
     // MARK: Who and what
 
+    private static let iconWidth: CGFloat = 28
+
     private func header(_ doc: FeedDocument, tone: Color) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 12) {
+                RobotIcon(color: tone).frame(width: Self.iconWidth, height: Self.iconWidth).padding(.top, 4)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(doc.requester?.name ?? doc.subtitle ?? "Someone")
                         .font(.system(size: 30, weight: .bold))
                         .lineLimit(2)
-                    Spacer()
-                    if waiting > 0 {
-                        Text("\(waiting) more").font(.footnote.monospacedDigit()).foregroundStyle(Theme.dim)
+                    ForEach([doc.requester?.detail, doc.requester?.context].compactMap { $0 }, id: \.self) { line in
+                        Text(line).font(.subheadline).foregroundStyle(Theme.dim).lineLimit(2)
                     }
                 }
-                ForEach([doc.requester?.detail, doc.requester?.context].compactMap { $0 }, id: \.self) { line in
-                    Text(line).font(.subheadline).foregroundStyle(Theme.dim).lineLimit(2)
+                Spacer(minLength: 0)
+                if waiting > 0 {
+                    Text("\(waiting) more").font(.footnote.monospacedDigit()).foregroundStyle(Theme.dim).padding(.top, 8)
                 }
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Label {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 20))
+                    .foregroundStyle(tone)
+                    .frame(width: Self.iconWidth, height: Self.iconWidth)
+                VStack(alignment: .leading, spacing: 3) {
                     Text(doc.item?.title ?? doc.title).font(.title2.weight(.semibold)).lineLimit(2)
-                } icon: {
-                    Image(systemName: "key.fill").foregroundStyle(tone)
-                }
-                if let detail = doc.item?.detail {
-                    Text(detail).font(.subheadline).foregroundStyle(Theme.dim).padding(.leading, 34)
+                    if let detail = doc.item?.detail {
+                        Text(detail).font(.subheadline).foregroundStyle(Theme.dim)
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.vertical, 16)
+    }
+
+    /// The agent's last message and the exact command line, small and dim. Documents from
+    /// providers that don't send them get their sections instead.
+    @ViewBuilder
+    private func details(_ doc: FeedDocument) -> some View {
+        if let context = doc.context {
+            VStack(alignment: .leading, spacing: 20) {
+                if let message = context.message {
+                    detail("Agent's last message") { Text(message).font(.callout) }
+                }
+                if let command = context.command {
+                    detail("Command") { Text(command).font(.footnote.monospaced()) }
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                ForEach(doc.sections ?? [], id: \.self) { SectionView(section: $0) }
+            }
+        }
+    }
+
+    private func detail(_ label: String, @ViewBuilder _ content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label).font(.caption.weight(.semibold))
+            content().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(Theme.dim)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Choices and answers
+
+    /// The Deny button's width, which the choice rows' labels share, so the choices line up
+    /// with the slider.
+    static let sideColumn: CGFloat = 84
+    static let columnGap: CGFloat = 10
 
     private func controls(_ doc: FeedDocument, tone: Color) -> some View {
         let approve = doc.actions.first { $0.role == "approve" }
@@ -105,7 +148,7 @@ struct RequestView: View {
             if let error {
                 Text(error).font(.footnote).foregroundStyle(Theme.danger)
             }
-            HStack(spacing: 10) {
+            HStack(spacing: Self.columnGap) {
                 ForEach(others, id: \.self) { action in
                     Button { send(action.id) } label: {
                         VStack(spacing: 1) {
@@ -120,10 +163,9 @@ struct RequestView: View {
                             }
                         }
                         .foregroundStyle(action.role == "deny" ? Theme.danger : Theme.text)
-                        .frame(width: 84, height: 52)
-                        .overlay(RoundedRectangle(cornerRadius: 26)
-                            .stroke(action.role == "deny" ? Theme.danger : Theme.border, lineWidth: 1.5))
-                        .contentShape(Rectangle())
+                        .frame(width: Self.sideColumn, height: 52)
+                        .overlay(Capsule().stroke(action.role == "deny" ? Theme.danger : Theme.border, lineWidth: 1.5))
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(PressScale())
                     .disabled(answer != nil)
@@ -259,9 +301,10 @@ private struct PickerRows: View {
     }
 
     private func row(_ name: String, values: [(String, Bool, Bool)], pick: @escaping (String) -> Void) -> some View {
-        HStack(spacing: 10) {
-            Text(name).font(.subheadline).foregroundStyle(Theme.dim).frame(width: 44, alignment: .leading)
-            HStack(spacing: 6) {
+        HStack(spacing: RequestView.columnGap) {
+            Text(name).font(.subheadline).foregroundStyle(Theme.dim)
+                .frame(width: RequestView.sideColumn, alignment: .leading)
+            HStack(spacing: 8) {
                 ForEach(values, id: \.0) { value, on, enabled in
                     Button { pick(value) } label: {
                         Text(value)
@@ -269,12 +312,13 @@ private struct PickerRows: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 9)
+                            .frame(height: 44)
                             .foregroundStyle(on ? Theme.stripeDark : Theme.text)
-                            .background(on ? tone : Theme.well, in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? tone : Theme.border))
+                            .background(on ? tone : Theme.well, in: Capsule())
+                            .overlay(Capsule().stroke(on ? tone : Theme.border, lineWidth: 1.5))
+                            .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressScale())
                     .disabled(!enabled)
                 }
             }
