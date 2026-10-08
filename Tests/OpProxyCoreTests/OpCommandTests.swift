@@ -154,7 +154,7 @@ final class ItemCatalogTests: XCTestCase {
         XCTAssertEqual(id(catalog.resolve(item: "aaaaaaaaaaaaaaaaaaaaaaaaaa", vault: nil)), "aaaaaaaaaaaaaaaaaaaaaaaaaa")
         XCTAssertEqual(id(catalog.resolve(item: "Chat webhook", vault: "private")), "aaaaaaaaaaaaaaaaaaaaaaaaaa", "vault name in any case")
         XCTAssertEqual(id(catalog.resolve(item: "chat webhook", vault: nil)), "aaaaaaaaaaaaaaaaaaaaaaaaaa", "title in any case")
-        XCTAssertEqual(id(catalog.resolve(item: "Slack", vault: nil)), nil, "never a substring")
+        XCTAssertEqual(id(catalog.resolve(item: "Chat", vault: nil)), nil, "never a substring")
         XCTAssertEqual(catalog.resolve(item: "Chat webhook", vault: "Engineering"), .none)
         XCTAssertEqual(id(catalog.resolve(item: "Build Bot Tracker App", vault: "v2")), "cccccccccccccccccccccccccc")
         guard case .many(let both) = catalog.resolve(item: "Build Bot Tracker App", vault: nil) else {

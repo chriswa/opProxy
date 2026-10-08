@@ -79,7 +79,7 @@ enum DialogPreview {
              linear),
             ("read-by-id",
              ["read", "op://Private/a8d2f6g1h9j4k7l3m5n0p2q6rs/password"],
-             #"export DEPLOY_KEY=$(op read 'op://Private/a8d2f6g1h9j4k7l3m5n0p2q6rs/password')"# + "\n" + #"curl -s https://api.example.com/v1/sessions -H "Authorization: Bearer $DEPLOY_KEY" | jq '.sessions[] | {session_id, status_enum, title}' | head -40"#,
+             #"export DEPLOY_KEY=$(op read 'op://Private/a8d2f6g1h9j4k7l3m5n0p2q6rs/password')"# + "\n" + #"curl -s https://api.example.com/v1/deploys -H "Authorization: Bearer $DEPLOY_KEY" | jq '.deploys[] | {id, status, title}' | head -40"#,
              "The release build failed again. Next I'll list recent deploys to find the one that ran the migration, then read its log.\n\nIf that deploy is gone I'll fall back to the build logs API.",
              ItemIdentity(itemId: "a8d2f6g1h9j4k7l3m5n0p2q6rs", vaultId: "q4a7m2x9c1v6b3n8z5k0w2e7rt",
                           title: "Deploy key", vaultName: "Private")),
