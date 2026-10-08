@@ -120,9 +120,9 @@ Every request that would show the dialog is also published, over iCloud, to each
 - **Recent Approvals.** Up to 20 active approvals, newest first. Each one has a submenu:
   - its details
   - **Duration** (1 Day from now, or Forever, with the current setting checked)
-  - **For** (This Session or All Agents). An all-agents approval narrows back to the session that asked for it.
+  - **For** (This Agent or All Agents). An all-agents approval narrows back to the agent that asked for it.
   - **Revoke This Approval**
-  - **Revoke Everything for This Session** (not shown for all-agents approvals)
+  - **Revoke Everything for This Agent** (not shown for all-agents approvals)
 
   Changing either re-signs the approval. It reuses your most recent approval's Touch ID, so it only asks again after a daemon restart. **Revoke All** sits at the bottom of the list.
 - **Pair an iPhone…** Shows the pairing QR code.

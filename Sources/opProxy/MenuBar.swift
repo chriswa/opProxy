@@ -131,7 +131,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 let reach = NSMenu()
                 reach.autoenablesItems = false
                 let narrowTo = key.audience == .allAgents ? approval.grantedTo : key.audience
-                let session = amendItem("This Session", Amend(key: key, title: approval.title, change: "this session only",
+                let session = amendItem("This Agent", Amend(key: key, title: approval.title, change: "this agent only",
                                                               audience: narrowTo))
                 session.state = key.audience == .allAgents ? .off : .on
                 // An all-agents approval granted on a phone or before this was recorded has no session to narrow to.
@@ -143,7 +143,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 submenu.addItem(.separator())
                 submenu.addItem(actionItem("Revoke This Approval", .one(approval.target)))
                 if key.audience != .allAgents {
-                    submenu.addItem(actionItem("Revoke Everything for This Session", .session(approval.target)))
+                    submenu.addItem(actionItem("Revoke Everything for This Agent", .session(approval.target)))
                 }
             case .terminal:
                 submenu.addItem(actionItem("Revoke This Terminal Tab's Access", .one(approval.target)))

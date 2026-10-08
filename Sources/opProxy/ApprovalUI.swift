@@ -198,7 +198,7 @@ final class ApprovalView: NSView {
     private var isAgent = false
     private let hint = NSTextField(wrappingLabelWithString: "")
     private let abandonedNote = NSTextField(wrappingLabelWithString:
-        "The agent stopped waiting. Approving still lets its retry through.")
+        "The agent stopped waiting. Allowing still lets its retry through.")
     private let copyButton = NSButton()
     /// The dialog as plain text, one entry per block, appended as each block is built.
     private var transcript: [String] = []
