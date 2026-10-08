@@ -7,7 +7,10 @@ import UIKit
 /// One Mac this phone is paired with (or pairing with): its zone and what it last wrote there.
 struct MacFeed: Equatable {
     let zoneID: CKRecordZone.ID
+    /// What the Mac calls itself.
     var name: String?
+    /// What this phone calls it, if set here.
+    var nickname: String?
     /// The Mac's paired keys, from its `hello`; nil until the Mac has joined the zone.
     var pairedKeys: [String]?
     var status: FeedProviderStatus?
@@ -18,7 +21,7 @@ struct MacFeed: Equatable {
     var helloWrittenAt: Date?
 
     var paired: Bool { pairedKeys?.contains(PhoneKey.keyId) == true }
-    var displayName: String { name ?? "Mac" }
+    var displayName: String { nickname ?? name ?? "Mac" }
 
     /// Whether the Mac has gone quiet with requests pending (asleep, or offline). A new
     /// request counts as hearing from it.
@@ -65,6 +68,21 @@ final class FeedModel: ObservableObject {
         didSet { UserDefaults.standard.set(rememberedMacs, forKey: Self.macsDefault) }
     }
     private static let macsDefault = "pairedMacs"
+
+    /// Names given to Macs on this phone, by zone name.
+    @Published private(set) var nicknames: [String: String] = UserDefaults.standard.dictionary(forKey: FeedModel.nicknamesDefault)
+        as? [String: String] ?? [:] {
+        didSet { UserDefaults.standard.set(nicknames, forKey: Self.nicknamesDefault) }
+    }
+    private static let nicknamesDefault = "macNicknames"
+
+    /// Names a Mac on this phone; blank goes back to the Mac's own name.
+    func setNickname(_ nickname: String, for mac: MacFeed) {
+        let trimmed = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        nicknames[mac.zoneID.zoneName] = trimmed.isEmpty ? nil : String(trimmed.prefix(40))
+        updateMac(mac.zoneID) { $0.nickname = nicknames[mac.zoneID.zoneName] }
+        update(\.rememberedMacs, Dictionary(uniqueKeysWithValues: pairedMacs.map { ($0.zoneID.zoneName, $0.displayName) }))
+    }
 
     var pairedMacs: [MacFeed] { macs.values.filter(\.paired).sorted { $0.displayName < $1.displayName } }
     var paired: Bool { loaded ? !pairedMacs.isEmpty : !rememberedMacs.isEmpty }
@@ -146,7 +164,7 @@ final class FeedModel: ObservableObject {
     }
 
     private func updateMac(_ zone: CKRecordZone.ID, _ change: (inout MacFeed) -> Void) {
-        var mac = macs[zone.zoneName] ?? MacFeed(zoneID: zone)
+        var mac = macs[zone.zoneName] ?? MacFeed(zoneID: zone, nickname: nicknames[zone.zoneName])
         change(&mac)
         if macs[zone.zoneName] != mac { macs[zone.zoneName] = mac }
     }
@@ -361,6 +379,7 @@ final class FeedModel: ObservableObject {
         zoneTokens[mac.zoneID.zoneName] = nil
         subscribed.remove(mac.zoneID.zoneName)
         update(\.rememberedMacs, rememberedMacs.filter { $0.key != mac.zoneID.zoneName })
+        nicknames[mac.zoneID.zoneName] = nil
         return nil
     }
 

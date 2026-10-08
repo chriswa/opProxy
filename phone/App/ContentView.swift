@@ -87,13 +87,28 @@ private struct MacRow: View {
     @EnvironmentObject private var model: FeedModel
     let mac: MacFeed
     @State private var asking = false
+    @State private var naming = false
+    @State private var nickname = ""
     @State private var error: String?
 
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "laptopcomputer").foregroundStyle(Theme.dim).frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
-                Text(mac.displayName).font(.subheadline.weight(.semibold))
+                // Tap to name it on this phone.
+                Button {
+                    nickname = mac.nickname ?? ""
+                    naming = true
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(mac.displayName).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.text)
+                        Image(systemName: "pencil").font(.caption).foregroundStyle(Theme.dim)
+                    }
+                }
+                .buttonStyle(.plain)
+                if mac.nickname != nil, let name = mac.name {
+                    Text(name).font(.caption).foregroundStyle(Theme.dim)
+                }
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text(error ?? Self.status(mac, now: context.date))
                         .font(.caption)
@@ -102,6 +117,13 @@ private struct MacRow: View {
             }
             Spacer()
             Button("Unpair") { asking = true }.font(.footnote).foregroundStyle(Theme.dim)
+        }
+        .alert("Name this Mac", isPresented: $naming) {
+            TextField(mac.name ?? "Mac", text: $nickname)
+            Button("Save") { model.setNickname(nickname, for: mac) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Requests from it show this name on this phone. Leave it blank to use the Mac's own name.")
         }
         .confirmationDialog("Unpair from \(mac.displayName)?", isPresented: $asking, titleVisibility: .visible) {
             Button("Unpair", role: .destructive) { Task { error = await model.unpair(mac) } }
