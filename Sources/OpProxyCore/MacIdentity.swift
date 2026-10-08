@@ -13,9 +13,12 @@ public struct MacIdentity: Equatable {
                     version: appVersion)
     }
 
-    /// The app bundle's version (the repo's VERSION), or "dev" for a bare binary.
+    /// The app bundle's version (the repo's VERSION), or "dev" for a bare binary. Found from
+    /// the executable's real path, since `op` and `opProxy` run it through symlinks.
     public static var appVersion: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        let executable = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])).resolvingSymlinksInPath()
+        let app = executable.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        return Bundle(url: app)?.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
     private static func id(_ paths: Paths) -> String {
