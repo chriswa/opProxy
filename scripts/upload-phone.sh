@@ -30,4 +30,4 @@ echo "== uploading"
 xcodebuild -exportArchive -archivePath "$OUT/SecretProxy.xcarchive" -exportOptionsPlist "$OUT/export.plist" \
     -exportPath "$OUT/export" -allowProvisioningUpdates -quiet
 echo "== uploaded $VERSION ($BUILD); waiting for Apple to process it"
-"$ROOT/scripts/testflight.sh"
+"$ROOT/scripts/testflight.sh" "$BUILD"
