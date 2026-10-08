@@ -505,8 +505,8 @@ struct DualSwipe: View {
     /// At rest: each answer's word on a dim arrow pointing to the far side, the countdown
     /// between them.
     private func labels(width: CGFloat) -> some View {
-        // Three quarters of the way from the knob to the middle.
-        let arrow = (width / 2 - Self.knob / 2 - 4) * 0.75 + Self.knob / 2
+        // 60% of the way from the knob to the middle.
+        let arrow = (width / 2 - Self.knob / 2 - 4) * 0.6 + Self.knob / 2
         return ZStack {
             HStack(spacing: 0) {
                 ArrowLabel(text: approve, color: Theme.approve, pointsRight: true).frame(width: arrow)
