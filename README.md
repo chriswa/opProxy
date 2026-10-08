@@ -38,7 +38,7 @@ Commands that only list things, such as `item list`, `vault list` and `whoami`, 
 
 1Password scopes CLI authorization to the Unix session (`getsid`). Claude Code, Codex and Cursor start every tool call in a new session, so without opProxy every `op` call raises a 1Password Touch ID prompt that gives no context.
 
-`~/opProxy/bin/op` is a link into `bin/opProxy.app`, and PATH puts it ahead of Homebrew's `op`. When invoked as `op`, it sends read-only commands over a Unix socket to a launchd daemon. The daemon runs the real `op` inside a **session holder**, a child process that leads its own Unix session. 1Password authorizes that one session, and every approved request runs in it.
+`~/.opProxy/bin/op` is a link to opProxy's own executable, and PATH puts it ahead of Homebrew's `op`. When invoked as `op`, it sends read-only commands over a Unix socket to a launchd daemon. The daemon runs the real `op` inside a **session holder**, a child process that leads its own Unix session. 1Password authorizes that one session, and every approved request runs in it.
 
 - **Authorization.** The daemon asks 1Password for access at startup, whenever the authorization ends, and when 1Password's 12-hour limit is reached. While 1Password's prompt is up, and the macOS privacy dialog that can precede it, a teal opProxy backdrop frames the prompt and explains why it's appearing, and each prompt it frames plays the approval dialog's chime as it appears. A `whoami` check every minute keeps 1Password's 10-minute idle timeout from firing, and it never raises a prompt itself.
 - **Secrets are never stored.** Each approved request is a live `op` call.
@@ -75,7 +75,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 - **Allow: Once · 1 Day · Forever.** Once is the default and remembers nothing.
 - **For: This agent · All agents.** Only applies to 1 Day and Forever. This agent means the session ID the agent claims, so a resumed session (`claude --resume <id>`) is covered too; an agent that names no session gets just its running process. All agents means every Claude Code, Codex and Cursor session, including ones started later.
 
-**Terminals and scripts** (no genuine agent above the caller). The approval works like 1Password's own: one approval covers every read from that terminal tab (Unix session) until it has been unused for 10 minutes, and never beyond 12 hours. The dialog shows the terminal app, the TTY and the process chain up to the tab's shell. These approvals are kept in memory only.
+**Terminals and scripts** (no genuine agent above the caller). The dialog offers **Once** or **This Terminal Tab**, the default, which works like 1Password's own: one approval covers every read from that terminal tab (Unix session) until it has been unused for 10 minutes, and never beyond 12 hours. The dialog shows the terminal app, the TTY and the process chain up to the tab's shell. These approvals are kept in memory only.
 
 ### The approval dialog
 
@@ -85,7 +85,7 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 - **Only Touch ID approves.** The dialog embeds Apple's inline Touch ID glyph (`LAAuthenticationView`), so there's no separate system sheet.
 - **Deny, or wait for the countdown.** The Deny button shows the countdown; after 5 minutes the request is denied.
 - **Guarded input.** The keyboard does nothing except ⌘C, and clicks are ignored for 500ms after the dialog appears.
-- **Agents that stop waiting.** If an agent gives up before you answer, the dialog says so. Approving still lets the agent's retry go through silently.
+- **Agents that stop waiting.** If an agent gives up before you answer, the dialog says so. Allowing still lets the agent's retry go through silently.
 
 ### Naming agents
 
@@ -100,7 +100,7 @@ For every request that asks you, the daemon runs the command with `{"environment
 
 ### Approving from your phone
 
-Every request that would show the dialog is also published, over iCloud, to each iPhone paired with this Mac, in the format `APPROVAL_FEED.md` describes. The iPhone app is `phone/`.
+Every request that would show the dialog is also published, over iCloud, to each iPhone paired with this Mac, in the format `APPROVAL_FEED.md` describes. The iPhone app, Secret Proxy, is in `phone/`.
 
 - **One zone per Mac.** For each Mac it's paired with, the phone owns a CloudKit zone in its private database, shared with that Mac's iCloud account alone, so no Mac sees another's requests. The Mac mirrors its pending requests and status into the zone and reads the phone's replies from it. Every field is an encrypted CloudKit value, readable only by the devices involved. The Mac and phone can be on different Apple IDs.
 - **Notifications.** The phone gets a time-sensitive notification for each new request, even when the app is closed, naming the Mac it came from. With the app open, the request just appears.
@@ -110,7 +110,7 @@ Every request that would show the dialog is also published, over iCloud, to each
 - **The first answer wins.** The dialog and the phone ask at the same time. Answer on either and the other one goes away; a late answer from the other side is refused. A request's countdown on the phone starts when its dialog appears on the Mac.
 - **Phone approvals work like Touch ID ones.** A lasting agent approval from the phone is stored and lasts just as long. It can't be signed by the Mac's Secure Enclave key without your Touch ID, so it's stored with the phone's own signed reply instead. That reply commits to the exact entry (which agents, item, approval time and expiry), so it can't be edited, moved to another request, widened to all agents or extended.
 - **Pairing.** Choose **Pair an iPhone…** in the Mac's menu (or run `opProxy pair-iphone`) and scan its QR code in the app. The code is one-time, lasts 10 minutes, and carries the Mac's iCloud account and its ID. The phone invites that account, and no one else, to a zone for that Mac (its share is never open to whoever holds the link), and leaves the invitation in the container's public database, sealed with a key derived from the code under a name derived from it. The Mac accepts, then asks you to confirm the phone: it shows the phone's name and key fingerprint; check the phone shows the same one, click **Pair…**, then touch Touch ID. The paired key is signed with the approval key, so nothing can pair a phone without your Touch ID.
-- **Naming the Mac.** Setup's "This Mac's name" sets what the phone calls it; until then, it's the computer's name.
+- **Naming the Mac.** Setup's "This Mac's name" sets what the phone calls it; until then, it's the computer's name. On the phone, tap a Mac's name in the empty queue to give it a nickname there.
 - **Unpairing.** On the phone, the empty queue lists the paired Macs, each with Unpair, which deletes that Mac's zone. On the Mac, `opProxy devices` lists paired phones with their fingerprints, and `opProxy unpair <key-id> | --all` (or the menu's **Paired Phones**) removes one. Unpairing a phone also ends every lasting approval made on it.
 
 ### Menu bar
@@ -125,8 +125,10 @@ Every request that would show the dialog is also published, over iCloud, to each
   - **Revoke Everything for This Session** (not shown for all-agents approvals)
 
   Changing either re-signs the approval. It reuses your most recent approval's Touch ID, so it only asks again after a daemon restart. **Revoke All** sits at the bottom of the list.
+- **Pair an iPhone…** Shows the pairing QR code.
 - **Paired Phones.** Each paired phone with its fingerprint; choosing one unpairs it.
 - **Installed.** Turns proxying off and on everywhere. When it's off, `op` goes straight to 1Password.
+- **Setup…** Opens Setup again.
 - **Open at Login**, **Restart opProxy**, **Quit opProxy.** The LaunchAgent relaunches the daemon only after a crash, so Quit stays quit until you log in again or open `bin/opProxy.app`.
 
 ## Install
@@ -161,7 +163,8 @@ To pair: in the Mac's key menu, choose **Pair an iPhone…**; in the app, tap **
 1. Start on the phone.
 2. Open the code on the Mac, then scan it.
 3. Check the fingerprints match, and confirm with Touch ID on the Mac.
- To pair another Mac, use **Pair another Mac** on the app's empty queue. Without a Mac, **Try a demo** on the pairing screen shows how it works.
+
+To pair another Mac, use **Pair another Mac** on the app's empty queue. Without a Mac, **Try a demo** on the pairing screen shows how it works.
 
 The Mac and iPhone apps share a version, shown in the key menu and at the foot of the app's empty queue. The app warns when a paired Mac runs a different one: update whichever is behind.
 
@@ -210,7 +213,7 @@ opProxy runs as your own user, with no root component. Every measure below assum
 - **Keystrokes typed into an approved terminal tab.** A tab approval covers every read for 10 idle minutes, so anything that can type into that tab (for example a terminal's automation, or AppleScript with Automation permission) can run `op read … | curl …` there. This is by design and matches 1Password's own per-tab model.
 - **Reuse of approved items.** A prompt-injected agent can read any field of an item you approved for all agents, or for its own session, for the duration you chose. That's limited to those items.
 - **Session IDs can be claimed.** This-agent approvals follow the session ID in the caller's environment, which opProxy can't verify. An agent that sets `CLAUDE_CODE_SESSION_ID` (or runs `exec env …`) to another session's ID reaches that session's approvals, so in practice a this-agent approval is open to any agent that knows the session ID. Session IDs appear in transcript file names under `~/.claude/projects`.
-- **Metadata is free.** Item titles, vaults, URLs and usernames come back from listings without any dialog.
+- **Metadata is free.** Listings run without any dialog and return each item's title, vault, category, website addresses, when it was created and last edited and by whom, and 1Password's one-line summary (for a login, the username), along with vault names and your account's email and sign-in address.
 - **Changes from the menu.** Anything with Accessibility permission could click the menu to extend an existing approval or widen it to all agents, since those changes reuse your last Touch ID. It can't create new approvals.
 
 **Can yield secrets from your phone, without Touch ID:**
