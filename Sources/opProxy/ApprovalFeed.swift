@@ -14,7 +14,8 @@ enum FeedMessage {
     var json: [String: Any] {
         switch self {
         case .hello(let keys, let mac):
-            return ["type": "hello", "protocol": 1, "provider": "opProxy", "pairedKeys": keys, "mac": ["id": mac.id, "name": mac.name]]
+            return ["type": "hello", "protocol": 1, "provider": "opProxy", "pairedKeys": keys,
+                    "mac": ["id": mac.id, "name": mac.name, "version": mac.version]]
         case .status(let status): return ["type": "status", "status": status]
         case .upsert(_, let item): return ["type": "upsert", "item": item]
         case .remove(let id, let note): return ["type": "remove", "id": id, "note": note]

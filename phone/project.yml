@@ -12,7 +12,7 @@ settings:
     DEVELOPMENT_TEAM: 7H2524M5TN
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "0.1"
+    MARKETING_VERSION: "0.2.2"
     CURRENT_PROJECT_VERSION: "1"
 # Every target uses CloudKit's Production environment, even in development builds, so the
 # Mac and the phone always meet there. Its schema is phone/schema.ckdb.

@@ -38,6 +38,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         installedItem.target = self
         installedItem.toolTip = "Unchecked: every op call goes straight to 1Password, bypassing opProxy"
         loginItem.target = self
+        let versionItem = NSMenuItem(title: "opProxy \(MacIdentity.appVersion)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
         let setupItem = NSMenuItem(title: "Setup…", action: #selector(showSetup), keyEquivalent: "")
         setupItem.target = self
         let restartItem = NSMenuItem(title: "Restart opProxy", action: #selector(restartApp), keyEquivalent: "")
@@ -51,7 +53,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         pairItem.target = self
         pairItem.isHidden = pairing == nil
         [statusLine, detailLine, .separator(), refreshItem, .separator(), .separator(), pairItem, phonesItem, installedItem,
-         loginItem, setupItem, .separator(), restartItem, quitItem].forEach(menu.addItem)
+         loginItem, setupItem, .separator(), versionItem, restartItem, quitItem].forEach(menu.addItem)
         menu.delegate = self
         item.menu = menu
         daemon.auth.onChange = { [weak self] _ in

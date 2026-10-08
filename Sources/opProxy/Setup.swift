@@ -141,6 +141,7 @@ private struct SetupView: View {
             }
             if let error { Text(error).foregroundStyle(.red) }
             HStack {
+                Text("opProxy \(MacIdentity.appVersion)").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Check Again") { check() }
             }

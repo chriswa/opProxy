@@ -5,9 +5,17 @@ import Foundation
 public struct MacIdentity: Equatable {
     public let id: String
     public let name: String
+    /// This build's version, which the iPhone app's should match.
+    public let version: String
 
     public static func current(_ paths: Paths) -> MacIdentity {
-        MacIdentity(id: id(paths), name: OpProxyConfig.load(paths)?.macName ?? Host.current().localizedName ?? "Mac")
+        MacIdentity(id: id(paths), name: OpProxyConfig.load(paths)?.macName ?? Host.current().localizedName ?? "Mac",
+                    version: appVersion)
+    }
+
+    /// The app bundle's version (the repo's VERSION), or "dev" for a bare binary.
+    public static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
     private static func id(_ paths: Paths) -> String {

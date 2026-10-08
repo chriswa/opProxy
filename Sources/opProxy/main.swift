@@ -28,6 +28,7 @@ let usage = """
       opProxy disable | enable       Send every op call straight to 1Password, or back through opProxy
       opProxy devices                Show phones paired to approve requests
       opProxy unpair <key-id> | --all  Unpair a phone (by key ID or fingerprint prefix); ends its lasting approvals
+      opProxy version                This build's version, which the iPhone app's should match
       opProxy setup                  Open the Setup window
       opProxy pair-iphone            Open the iPhone app's pairing code
       opProxy install-agent          Install and start the background agent for this copy of opProxy
@@ -180,6 +181,9 @@ case "unpair":
         let n = try devices.unpair { target == "--all" || ids.contains($0.keyId) }
         print("Unpaired \(n) phone\(n == 1 ? "" : "s"). Approvals made on \(n == 1 ? "it" : "them") no longer verify.")
     } catch { fail("could not update \(paths.pairedDevices.path): \(error)") }
+
+case "version", "--version":
+    print(MacIdentity.appVersion)
 
 case "install-agent":
     // install.sh: what opening the app does on a Mac with no agent yet.

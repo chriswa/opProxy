@@ -61,6 +61,7 @@ private struct EmptyQueue: View {
             ContentUnavailableView("No pending requests", systemImage: "checkmark.shield",
                                    description: Text("When an agent asks for a secret, it shows up here."))
             VStack(alignment: .leading, spacing: 10) {
+                ForEach(model.pairedMacs.filter(\.mismatched), id: \.zoneID) { VersionWarning(mac: $0) }
                 Text("Paired Macs").font(.footnote.weight(.semibold)).foregroundStyle(Theme.dim)
                 ForEach(model.pairedMacs, id: \.zoneID) { MacRow(mac: $0) }
                 Button {
@@ -70,6 +71,7 @@ private struct EmptyQueue: View {
                 }
                 .foregroundStyle(Theme.tone(nil))
                 .padding(.top, 4)
+                Text("Secret Proxy \(FeedModel.appVersion)").font(.caption2).foregroundStyle(Theme.dim).padding(.top, 6)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -168,5 +170,26 @@ private struct ErrorBar: View {
                 .padding(10)
                 .background(Theme.surface)
         }
+    }
+}
+
+/// A Mac running a different version from this app. The two are released together, so one
+/// of them needs updating.
+private struct VersionWarning: View {
+    let mac: MacFeed
+
+    var body: some View {
+        Label {
+            Text("\(mac.displayName) runs opProxy \(mac.version ?? "older than 0.2.2"), and this phone runs "
+                 + "\(FeedModel.appVersion). Update whichever is behind.")
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.tone(nil))
+        }
+        .font(.footnote)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.well, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.tone(nil).opacity(0.6)))
     }
 }

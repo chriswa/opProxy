@@ -1,13 +1,15 @@
 #!/bin/bash
 # Builds opProxy.app for other Macs: Developer ID-signed for CloudKit, notarized and stapled.
-#   scripts/release.sh <version> [--publish]
+#   scripts/release.sh [--publish]
 # Builds from the committed source (a fresh export of HEAD), so no Mac's pinned approval key
 # gets in. --publish uploads the zip as GitHub release v<version>. Needs Xcode signed in to
 # the developer account and the "opProxy" notarytool profile (xcrun notarytool store-credentials).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-VERSION=${1:?usage: scripts/release.sh <version> [--publish]}
-PUBLISH=${2:-}
+VERSION=$(cat "$ROOT/VERSION")
+PUBLISH=${1:-}
+grep -q "MARKETING_VERSION: \"$VERSION\"" "$ROOT/phone/project.yml" \
+    || { echo "phone/project.yml's version isn't $VERSION: run scripts/bump-version.sh"; exit 1; }
 OUT="$ROOT/.build/release-$VERSION"
 rm -rf "$OUT" && mkdir -p "$OUT/src"
 [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ] || echo "note: uncommitted changes aren't in the release"
@@ -41,7 +43,7 @@ codesign -d --entitlements :- "$OUT/stub/opProxy.app" > "$OPPROXY_ENTITLEMENTS" 
 
 echo "== signing"
 APP="$OUT/opProxy.app"
-"$ROOT/scripts/assemble-app.sh" "$OUT/src/.build/release/opProxy" "$APP" "$VERSION"
+"$ROOT/scripts/assemble-app.sh" "$OUT/src/.build/release/opProxy" "$APP"
 "$ROOT/scripts/sign-app.sh" "$APP" | grep -q "signing with CloudKit: Developer ID" || { echo "not signed with Developer ID"; exit 1; }
 
 echo "== notarizing"

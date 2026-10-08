@@ -11,6 +11,8 @@ struct MacFeed: Equatable {
     var name: String?
     /// What this phone calls it, if set here.
     var nickname: String?
+    /// The opProxy version it runs, from its `hello`; nil from versions that didn't say.
+    var version: String?
     /// The Mac's paired keys, from its `hello`; nil until the Mac has joined the zone.
     var pairedKeys: [String]?
     var status: FeedProviderStatus?
@@ -22,6 +24,8 @@ struct MacFeed: Equatable {
 
     var paired: Bool { pairedKeys?.contains(PhoneKey.keyId) == true }
     var displayName: String { nickname ?? name ?? "Mac" }
+    /// Whether it runs a different version from this app: the two are released together.
+    var mismatched: Bool { version != FeedModel.appVersion }
 
     /// Whether the Mac has gone quiet with requests pending (asleep, or offline). A new
     /// request counts as hearing from it.
@@ -82,6 +86,11 @@ final class FeedModel: ObservableObject {
         nicknames[mac.zoneID.zoneName] = trimmed.isEmpty ? nil : String(trimmed.prefix(40))
         updateMac(mac.zoneID) { $0.nickname = nicknames[mac.zoneID.zoneName] }
         update(\.rememberedMacs, Dictionary(uniqueKeysWithValues: pairedMacs.map { ($0.zoneID.zoneName, $0.displayName) }))
+    }
+
+    /// This app's version, which every paired Mac's should match.
+    nonisolated static var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
     var pairedMacs: [MacFeed] { macs.values.filter(\.paired).sorted { $0.displayName < $1.displayName } }
@@ -277,6 +286,7 @@ final class FeedModel: ObservableObject {
                     mac.helloWrittenAt = record.modificationDate
                     mac.pairedKeys = message["pairedKeys"] as? [String] ?? []
                     mac.name = (message["mac"] as? [String: Any])?["name"] as? String
+                    mac.version = (message["mac"] as? [String: Any])?["version"] as? String
                 case CloudFeed.State.presence:
                     mac.presenceAt = (message["aliveAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
                 case CloudFeed.State.status:
