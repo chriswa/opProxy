@@ -1,6 +1,6 @@
 # opProxy: notes for agents
 
-opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in front of agents' 1Password CLI reads. Secret Proxy is its iPhone app (`phone/`), which answers the same requests over iCloud. README.md says how both work; APPROVAL_FEED.md is the protocol between them; PROVIDER_ADAPTERS.md is a plan for later.
+opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in front of agents' 1Password CLI reads. Its iPhone app, also called opProxy, is in `phone/`, which answers the same requests over iCloud. README.md says how both work; APPROVAL_FEED.md is the protocol between them; PROVIDER_ADAPTERS.md is a plan for later.
 
 ## Layout
 
@@ -18,7 +18,7 @@ opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in
 | Mac app | `com.chriswa.opproxy` |
 | iPhone app / notification extension | `com.chriswa.opproxy.phone` / `.phone.notifications` |
 | CloudKit container | `iCloud.com.chriswa.opproxy`, Production environment for every build (an entitlement in `project.yml`) |
-| App Store Connect app | Secret Proxy, ID 6820385028, SKU `secretproxy` |
+| App Store Connect app | opProxy (iPhone), ID 6820385028, SKU `secretproxy` |
 | TestFlight | external group "Coworkers", public link https://testflight.apple.com/join/6MFDbtVE |
 | App Store Connect API key | "opProxy releases", key ID DFK3C9K7M4, issuer bb77b192-3592-48c2-9168-4ba2c99cf7d0, App Manager role; the `.p8` is at `~/.appstoreconnect/private_keys/AuthKey_DFK3C9K7M4.p8` |
 | Notarization | `notarytool` keychain profile `opProxy`, made from that key |

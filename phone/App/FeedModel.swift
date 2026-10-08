@@ -236,7 +236,7 @@ final class FeedModel: ObservableObject {
     /// What to tell someone about a CloudKit failure.
     static func describe(_ error: Error) -> String {
         switch (error as? CKError)?.code {
-        case .notAuthenticated: return "Sign in to iCloud in Settings to use Secret Proxy."
+        case .notAuthenticated: return "Sign in to iCloud in Settings to use opProxy."
         case .networkUnavailable, .networkFailure: return "Offline. Requests will show up when you're back online."
         case .quotaExceeded: return "Your iCloud storage is full."
         default: return "iCloud: \(error.localizedDescription)"
@@ -367,7 +367,7 @@ final class FeedModel: ObservableObject {
                                                subscriptionID: "new-requests-\(zone.zoneName)", options: [.firesOnRecordCreation])
         subscription.zoneID = zone
         let info = CKSubscription.NotificationInfo()
-        info.title = "Secret Proxy"
+        info.title = "opProxy"
         info.alertBody = "An agent is asking for a secret."
         info.soundName = "default"
         info.shouldSendMutableContent = true
@@ -458,7 +458,7 @@ final class FeedModel: ObservableObject {
     /// for it to join, then asks it to trust this phone's key. Returns nil once paired, else why not.
     func pair(qr: String, progress: @escaping (String) -> Void) async -> String? {
         guard let (code, macUser, macID) = CloudFeed.Rendezvous.parse(qr: qr) else {
-            return "That isn't a Secret Proxy pairing code. If it came from an older Mac version, update it there."
+            return "That isn't an opProxy pairing code. If it came from an older Mac version, update it there."
         }
         let zone = CKRecordZone.ID(zoneName: CloudFeed.zoneName(macID: macID))
         let rendezvousID = CKRecord.ID(recordName: CloudFeed.Rendezvous.recordName(code: code))
@@ -507,7 +507,7 @@ final class FeedModel: ObservableObject {
         }
         let share = existing ?? CKShare(recordZoneID: zone)
         share.publicPermission = .none
-        share[CKShare.SystemFieldKey.title] = "Secret Proxy requests"
+        share[CKShare.SystemFieldKey.title] = "opProxy requests"
         func isMac(_ participant: CKShare.Participant) -> Bool {
             participant.userIdentity.userRecordID?.recordName == macUser
         }

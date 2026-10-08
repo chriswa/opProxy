@@ -28,7 +28,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Secret Proxy
+        INFOPLIST_KEY_CFBundleDisplayName: opProxy
         INFOPLIST_KEY_NSCameraUsageDescription: Scans the pairing code your Mac shows.
         # Only standard signing and encryption (CryptoKit, iCloud), which is exempt.
         INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
@@ -54,7 +54,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chriswa.opproxy.phone.notifications
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: Secret Proxy Notifications
+        INFOPLIST_KEY_CFBundleDisplayName: opProxy Notifications
     info:
       path: NotificationService/Info.plist
       properties:

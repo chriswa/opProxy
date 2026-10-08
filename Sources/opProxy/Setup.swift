@@ -127,7 +127,7 @@ private struct SetupView: View {
             }
             if let pairing {
                 step(done: nil, title: "Answer from your iPhone (optional)",
-                     detail: "Install Secret Proxy on your iPhone, then pair it to answer requests there too. "
+                     detail: "Install opProxy on your iPhone, then pair it to answer requests there too. "
                         + "A phone paired with several Macs shows each request with its Mac's name.") {
                     HStack {
                         Text("This Mac's name")

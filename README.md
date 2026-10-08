@@ -1,6 +1,6 @@
 # opProxy
 
-A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. When an agent asks for a secret, a dialog shows you the item, who is asking and why, and you answer there or on a paired iPhone running Secret Proxy, opProxy's iPhone app. Allow it just this once, so you're asked every time, or let that agent, or every agent, read that item for a day or for good.
+A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. When an agent asks for a secret, a dialog shows you the item, who is asking and why, and you answer there or on a paired iPhone running opProxy's iPhone app. Allow it just this once, so you're asked every time, or let that agent, or every agent, read that item for a day or for good.
 
 > [!WARNING]
 > **opProxy lets listings through without asking.** Commands like `item list` and `vault list` return no secrets, so they always run. They do reveal your vaults' metadata to anything that can run `op`, whether an agent, a script or someone at a terminal: each item's title, vault, category, website addresses, when it was created and last edited and by whom, and 1Password's one-line summary of it (for a login, the username). Your vault names are visible too (`vault list`), as are your account's email and sign-in address (`whoami`, `account list`).
@@ -12,7 +12,7 @@ A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI 
 ## Why
 
 - **1Password's prompt doesn't say who's asking, or for what.** It asks you to unlock the CLI, but not which agent wants it or which item it will read. With several agents running, you can't tell which one is prompting you, and since agents run each command in a new session, the prompts keep coming. opProxy's dialog names the agent and its session, the item and vault, the exact command, and the agent's last message, so you know what you're allowing before you allow it.
-- **Answer from anywhere.** Requests also go to Secret Proxy on your iPhone, with a notification. Allow or deny without going back to your desk, and an agent working on its own isn't stuck waiting for you.
+- **Answer from anywhere.** Requests also go to opProxy on your iPhone, with a notification. Allow or deny without going back to your desk, and an agent working on its own isn't stuck waiting for you.
 - **Allow once, or for a while.** Allow a single read, or let one agent (or all of them) read that item for a day or for good. Repeats then run without asking.
 
 <p align="center">
@@ -100,7 +100,7 @@ For every request that asks you, the daemon runs the command with `{"environment
 
 ### Approving from your phone
 
-Every request that would show the dialog is also published, over iCloud, to each iPhone paired with this Mac, in the format `APPROVAL_FEED.md` describes. The iPhone app, Secret Proxy, is in `phone/`.
+Every request that would show the dialog is also published, over iCloud, to each iPhone paired with this Mac, in the format `APPROVAL_FEED.md` describes. The iPhone app, also called opProxy, is in `phone/`.
 
 - **One zone per Mac.** For each Mac it's paired with, the phone owns a CloudKit zone in its private database, shared with that Mac's iCloud account alone, so no Mac sees another's requests. The Mac mirrors its pending requests and status into the zone and reads the phone's replies from it. Every field is an encrypted CloudKit value, readable only by the devices involved. The Mac and phone can be on different Apple IDs.
 - **Notifications.** The phone gets a time-sensitive notification for each new request, even when the app is closed, naming the Mac it came from. With the app open, the request just appears.
@@ -147,10 +147,10 @@ You need a Mac with the [1Password CLI](https://developer.1password.com/docs/cli
 
 **Setup…** in the key menu (or `opProxy setup`) opens it again. Opening a newer `opProxy.app` replaces the running one. On first start, macOS asks to let opProxy "access data from other apps" (the 1Password CLI reads 1Password's group container), and 1Password asks you to authorize it.
 
-### The iPhone app (Secret Proxy)
+### The iPhone app
 
-- **TestFlight:** open [testflight.apple.com/join/6MFDbtVE](https://testflight.apple.com/join/6MFDbtVE) on the iPhone, install TestFlight if asked, then Secret Proxy. TestFlight builds expire after 90 days; newer ones arrive through TestFlight.
-- **App Store:** once it's approved, search for Secret Proxy. (Not yet released.)
+- **TestFlight:** open [testflight.apple.com/join/6MFDbtVE](https://testflight.apple.com/join/6MFDbtVE) on the iPhone, install TestFlight if asked, then opProxy. TestFlight builds expire after 90 days; newer ones arrive through TestFlight.
+- **App Store:** once it's approved, search for opProxy. (Not yet released.)
 
 To pair: in the Mac's key menu, choose **Pair an iPhone…**; in the app, tap **Scan the Mac's code** and scan it; check the fingerprint matches on the Mac and confirm with Touch ID.
 

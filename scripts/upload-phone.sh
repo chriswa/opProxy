@@ -22,7 +22,7 @@ cat > "$OUT/export.plist" <<PLIST
   <key>teamID</key><string>7H2524M5TN</string>
 </dict></plist>
 PLIST
-echo "== archiving Secret Proxy $VERSION ($BUILD)"
+echo "== archiving the opProxy iPhone app $VERSION ($BUILD)"
 xcodebuild -project "$ROOT/phone/OpProxyPhone.xcodeproj" -scheme OpProxyPhone -configuration Release \
     -destination 'generic/platform=iOS' -archivePath "$OUT/SecretProxy.xcarchive" -allowProvisioningUpdates \
     CURRENT_PROJECT_VERSION="$BUILD" -quiet archive

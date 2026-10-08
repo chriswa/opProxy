@@ -82,7 +82,7 @@ private struct EmptyQueue: View {
                     .foregroundStyle(Theme.tone(nil))
                     .padding(.top, 4)
                 }
-                Text("Secret Proxy \(FeedModel.appVersion)").font(.caption2).foregroundStyle(Theme.dim).padding(.top, 6)
+                Text("opProxy \(FeedModel.appVersion)").font(.caption2).foregroundStyle(Theme.dim).padding(.top, 6)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
