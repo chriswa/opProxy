@@ -11,18 +11,15 @@ A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI 
 - **Answer from anywhere.** Requests also go to Secret Proxy on your iPhone, with a notification. Allow or deny without going back to your desk, and an agent working on its own isn't stuck waiting for you.
 - **Allow once, or for a while.** Allow a single read, or let one agent (or all of them) read that item for a day or for good. Repeats then run without asking.
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/iphone-request.png" width="240" alt="A request on the iPhone: Claude Code Agent asks for the GitHub token, with the command and its last message, and Allow and Deny to drag"></td>
-    <td><img src="docs/screenshots/iphone-allowed.png" width="240" alt="The request allowed, confirmed by the Mac"></td>
-    <td><img src="docs/screenshots/iphone-macs.png" width="240" alt="No pending requests, with two paired Macs and their 1Password authorization"></td>
-  </tr>
-  <tr>
-    <td>An agent asks for a secret: who, what, the exact command and its last message. Choose how long, then drag to allow or deny.</td>
-    <td>The Mac confirms it got your answer, and the agent's command goes through.</td>
-    <td>One phone answers for several Macs, each with how long its 1Password authorization has left.</td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/iphone-request.png" width="32%" alt="A request on the iPhone: Claude Code Agent asks for the GitHub token, with the command and its last message, and Allow and Deny to drag">
+  <img src="docs/screenshots/iphone-allowed.png" width="32%" alt="The request allowed, confirmed by the Mac">
+  <img src="docs/screenshots/iphone-macs.png" width="32%" alt="No pending requests, with two paired Macs and their 1Password authorization">
+</p>
+
+1. An agent asks for a secret: who, what, the exact command and its last message. Choose how long, then drag to allow or deny.
+2. The Mac confirms it got your answer, and the agent's command goes through.
+3. One phone answers for several Macs, each with how long its 1Password authorization has left.
 
 ## Architecture
 
@@ -151,18 +148,15 @@ You need a Mac with the [1Password CLI](https://developer.1password.com/docs/cli
 
 To pair: in the Mac's key menu, choose **Pair an iPhone…**; in the app, tap **Scan the Mac's code** and scan it; check the fingerprint matches on the Mac and confirm with Touch ID.
 
-<table>
-  <tr>
-    <td><img src="docs/screenshots/iphone-pairing.png" width="200" alt="Pair with your Mac, with the phone's fingerprint"></td>
-    <td><img src="docs/screenshots/iphone-guide.png" width="200" alt="Where to find Pair an iPhone in the Mac's menu"></td>
-    <td><img src="docs/screenshots/iphone-confirm.png" width="200" alt="Pairing: confirm on the Mac with Touch ID"></td>
-  </tr>
-  <tr>
-    <td>Start on the phone.</td>
-    <td>Open the code on the Mac, then scan it.</td>
-    <td>Check the fingerprints match, and confirm with Touch ID on the Mac.</td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/screenshots/iphone-pairing.png" width="32%" alt="Pair with your Mac, with the phone's fingerprint">
+  <img src="docs/screenshots/iphone-guide.png" width="32%" alt="Where to find Pair an iPhone in the Mac's menu">
+  <img src="docs/screenshots/iphone-confirm.png" width="32%" alt="Pairing: confirm on the Mac with Touch ID">
+</p>
+
+1. Start on the phone.
+2. Open the code on the Mac, then scan it.
+3. Check the fingerprints match, and confirm with Touch ID on the Mac.
  To pair another Mac, use **Pair another Mac** on the app's empty queue. Without a Mac, **Try a demo** on the pairing screen shows how it works.
 
 The Mac and iPhone apps share a version, shown in the key menu and at the foot of the app's empty queue. The app warns when a paired Mac runs a different one: update whichever is behind.
