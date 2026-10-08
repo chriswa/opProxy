@@ -32,7 +32,7 @@ A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI 
   <img src="docs/architecture-light.svg" alt="An agent's op command reaches opProxy's shim and daemon; listing commands go straight to the 1Password CLI, while secret reads run only if a remembered approval matches or you allow them on your Mac or iPhone, and denied or unanswered requests are refused." width="100%">
 </picture>
 
-Commands that only list things, such as `item list`, `vault list` and `whoami`, are always allowed, with no dialog. That's a trade-off: they return no secret values, but they do show item titles, vault names, URLs and usernames, which some people consider sensitive too. Writes and anything opProxy doesn't recognise go straight to the real `op`, which asks 1Password itself. An approval covers one item, every field of it, through `read`, `item get` or `document get`, until it expires or you revoke it from the menu.
+Commands that only list things, such as `item list`, `vault list` and `whoami`, are always allowed, with no dialog. That's a trade-off: they return no secret values, but they do show the metadata the warning at the top lists, which some people consider sensitive too. Writes and anything opProxy doesn't recognise go straight to the real `op`, which asks 1Password itself. An approval covers one item, every field of it, through `read`, `item get` or `document get`, until it expires or you revoke it from the menu.
 
 ## How it works
 
