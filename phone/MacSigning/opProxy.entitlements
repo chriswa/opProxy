@@ -18,5 +18,9 @@
 	</array>
 	<key>com.apple.developer.team-identifier</key>
 	<string>7H2524M5TN</string>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>7H2524M5TN.com.chriswa.opproxy</string>
+	</array>
 </dict>
 </plist>

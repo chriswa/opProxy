@@ -70,6 +70,8 @@ public enum DaemonMessage: Codable {
     /// Opens the iPhone pairing QR code on the Mac; replies with `DaemonStatus`, whose error
     /// says why not.
     case pairPhone
+    /// Opens the Setup window; replies with `DaemonStatus`.
+    case showSetup
 }
 
 public struct DaemonStatus: Codable {

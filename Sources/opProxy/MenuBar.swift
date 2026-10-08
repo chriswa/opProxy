@@ -8,6 +8,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let daemon: Daemon
     /// Present when this build can use CloudKit (it's signed with the provisioning profile).
     private let pairing: CloudPairing?
+    private let paths: Paths
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let detailLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -22,9 +23,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var lastError: String?
     private var timer: Timer?
 
-    init(daemon: Daemon, pairing: CloudPairing?) {
+    init(daemon: Daemon, pairing: CloudPairing?, paths: Paths) {
         self.daemon = daemon
         self.pairing = pairing
+        self.paths = paths
         super.init()
         // Lets Ice and macOS remember the item's position.
         item.autosaveName = "opProxy"
@@ -36,6 +38,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         installedItem.target = self
         installedItem.toolTip = "Unchecked: every op call goes straight to 1Password, bypassing opProxy"
         loginItem.target = self
+        let setupItem = NSMenuItem(title: "Setup…", action: #selector(showSetup), keyEquivalent: "")
+        setupItem.target = self
         let restartItem = NSMenuItem(title: "Restart opProxy", action: #selector(restartApp), keyEquivalent: "")
         restartItem.target = self
         let quitItem = NSMenuItem(title: "Quit opProxy", action: #selector(quitApp), keyEquivalent: "")
@@ -47,7 +51,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         pairItem.target = self
         pairItem.isHidden = pairing == nil
         [statusLine, detailLine, .separator(), refreshItem, .separator(), .separator(), pairItem, phonesItem, installedItem,
-         loginItem, .separator(), restartItem, quitItem].forEach(menu.addItem)
+         loginItem, setupItem, .separator(), restartItem, quitItem].forEach(menu.addItem)
         menu.delegate = self
         item.menu = menu
         daemon.auth.onChange = { [weak self] _ in
@@ -219,6 +223,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func pairPhone() { pairing?.start() }
+
+    @objc private func showSetup() { SetupWindow.show(paths: paths, pairing: pairing) }
 
     @objc private func unpair(_ sender: NSMenuItem) {
         guard let keyId = sender.representedObject as? String else { return }

@@ -21,19 +21,9 @@ stop() {
 case "${1:-}" in
 start)
     stop
-    mkdir -p "$APP/Contents/MacOS" && chmod 700 "$OPPROXY_HOME"
+    mkdir -p "$OPPROXY_HOME" && chmod 700 "$OPPROXY_HOME"
     swift build --package-path "$ROOT" >/dev/null
-    cp "$ROOT/.build/debug/opProxy" "$BIN"
-    cat > "$APP/Contents/Info.plist" <<INFO
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.chriswa.opproxy</string>
-  <key>CFBundleExecutable</key><string>opProxy</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>LSUIElement</key><true/>
-</dict></plist>
-INFO
+    "$ROOT/scripts/assemble-app.sh" "$ROOT/.build/debug/opProxy" "$APP"
     "$ROOT/scripts/sign-app.sh" "$APP" | grep -q "signing with CloudKit" || { echo "no CloudKit profile: run scripts/provision-mac.sh"; exit 1; }
     cat > "$OPPROXY_REAL_OP" <<'STUB'
 #!/bin/bash

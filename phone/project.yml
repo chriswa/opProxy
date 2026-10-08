@@ -88,3 +88,5 @@ targets:
         com.apple.developer.icloud-container-environment: Production
         com.apple.developer.team-identifier: 7H2524M5TN
         com.apple.application-identifier: 7H2524M5TN.com.chriswa.opproxy
+        # The approval key lives in this group (KeychainSigner).
+        keychain-access-groups: [7H2524M5TN.com.chriswa.opproxy]

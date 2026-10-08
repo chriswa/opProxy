@@ -28,6 +28,9 @@ let usage = """
       opProxy disable | enable       Send every op call straight to 1Password, or back through opProxy
       opProxy devices                Show phones paired to approve requests
       opProxy unpair <key-id> | --all  Unpair a phone (by key ID or fingerprint prefix); ends its lasting approvals
+      opProxy setup                  Open the Setup window
+      opProxy pair-iphone            Open the iPhone app's pairing code
+      opProxy install-agent          Install and start the background agent for this copy of opProxy
 
     """
 
@@ -48,8 +51,8 @@ let paths = Paths()
 
 // Launched as an app (Finder, `open`, a login item) rather than as a command: the executable
 // is run by its path inside the bundle with no arguments.
-if arguments.count == 1, arguments[0].contains(".app/Contents/MacOS/") {
-    LaunchAgent.startFromAppLaunch(paths: paths)
+if arguments.count == 1, arguments[0].contains(".app/Contents/MacOS/"), let executable = Bundle.main.executablePath {
+    LaunchAgent.startFromAppLaunch(paths: paths, executable: executable)
 }
 
 switch arguments.dropFirst().first {
@@ -62,7 +65,7 @@ case "daemon":
     } else {
         local = DialogApprover()
     }
-    let signer = makeApprovalSigner(paths: paths)
+    let signer = makeApprovalSigner(paths: paths, log: log)
     let devices = makePairedDeviceStore(paths: paths, signer: signer)
     // Every request is also published for paired phones; the first answer wins.
     let feed = ApprovalFeed(log: log, devices: devices, confirmPairing:
@@ -84,13 +87,14 @@ case "daemon":
     feed.start([FeedSocket(path: paths.approvalFeed, log: log)] + [cloud].compactMap { $0 })
     let pairing = cloud.map { CloudPairing(transport: $0, log: log) }
     daemon.onPairPhone = pairing.map { pairing in { pairing.start() } }
+    daemon.onShowSetup = { SetupWindow.show(paths: paths, pairing: pairing) }
     if let file = TestKnobs.value("OPPROXY_TEST_CLOUD_PAIR"), let pairing {
         pairing.testPayloadFile = URL(fileURLWithPath: file)
         DispatchQueue.main.async { pairing.start() }
     }
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
-    let menuBar = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? MenuBarController(daemon: daemon, pairing: pairing) : nil
+    let menuBar = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? MenuBarController(daemon: daemon, pairing: pairing, paths: paths) : nil
     withExtendedLifetime((menuBar, authContext, systemEvents)) { app.run() }
 
 case "disable", "enable":
@@ -172,6 +176,15 @@ case "unpair":
         let n = try devices.unpair { target == "--all" || ids.contains($0.keyId) }
         print("Unpaired \(n) phone\(n == 1 ? "" : "s"). Approvals made on \(n == 1 ? "it" : "them") no longer verify.")
     } catch { fail("could not update \(paths.pairedDevices.path): \(error)") }
+
+case "install-agent":
+    // install.sh: what opening the app does on a Mac with no agent yet.
+    guard let executable = Bundle.main.executablePath else { fail("cannot find my own executable") }
+    Setup.linkCommands(to: executable)
+    do { try LaunchAgent.install(executable: executable, paths: paths) } catch { fail("could not install the background agent: \(error)") }
+
+case "setup":
+    guard daemonStatus(.showSetup) != nil else { fail("the opProxy daemon isn't running; open opProxy.app") }
 
 case "pair-iphone":
     guard let status = daemonStatus(.pairPhone) else { fail("the opProxy daemon isn't running") }

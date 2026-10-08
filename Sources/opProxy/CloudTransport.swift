@@ -21,13 +21,7 @@ struct CloudLink: Codable, Equatable {
 final class CloudTransport: FeedTransport {
     /// Whether this binary may use the container: CloudKit raises an exception rather than
     /// failing when it can't, and only a signed build with the provisioning profile can.
-    static var available: Bool {
-        guard let task = SecTaskCreateFromSelf(nil),
-              let ids = SecTaskCopyValueForEntitlement(task, "com.apple.developer.icloud-container-identifiers" as CFString, nil)
-                as? [String]
-        else { return false }
-        return ids.contains(CloudFeed.container)
-    }
+    static var available: Bool { Entitlement.strings("com.apple.developer.icloud-container-identifiers").contains(CloudFeed.container) }
 
     private let log: Log
     private let linksURL: URL

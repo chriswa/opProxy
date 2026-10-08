@@ -2,8 +2,8 @@ import AppKit
 import Foundation
 import OpProxyCore
 
-/// The daemon runs as the LaunchAgent install.sh writes (restarted by launchd if it crashes).
-/// These map the menu's Open at Login / Restart / Quit onto it.
+/// The daemon runs as a LaunchAgent (restarted by launchd if it crashes), which opening the app
+/// or install.sh writes. These map the menu's Open at Login / Restart / Quit onto it.
 enum LaunchAgent {
     static let label = "com.chriswa.opproxy"
     private static var domain: String { "gui/\(getuid())" }
@@ -32,14 +32,59 @@ enum LaunchAgent {
     /// or until the app is opened.
     static func quit() { NSApp.terminate(nil) }
 
-    /// Opening opProxy.app (Finder, `open`) starts the daemon if it isn't running.
-    static func startFromAppLaunch(paths: Paths) -> Never {
-        if let fd = UnixSocket.connect(path: paths.socket.path) { close(fd); exit(0) }
-        let plist = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/LaunchAgents/\(label).plist").path
-        if launchctl(["kickstart", "\(domain)/\(label)"]).status != 0 {
-            _ = launchctl(["bootstrap", domain, plist])
+    private static var plist: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(label).plist")
+    }
+
+    /// The program the installed agent runs, if there is one.
+    static var installedProgram: String? {
+        guard let data = try? Data(contentsOf: plist),
+              let dict = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        else { return nil }
+        return (dict["ProgramArguments"] as? [String])?.first
+    }
+
+    /// Writes the agent for `executable` and (re)starts it, keeping the user's Open at Login
+    /// choice; returns once the daemon is listening (or after 5 seconds).
+    static func install(executable: String, paths: Paths) throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        try paths.ensureStateDir()
+        let agent: [String: Any] = [
+            "Label": label,
+            "ProgramArguments": [executable, "daemon"],
+            "RunAtLoad": true,
+            // Relaunch after a crash, but not after the menu's Quit (a clean exit).
+            "KeepAlive": ["SuccessfulExit": false],
+            "ProcessType": "Interactive",
+            "StandardErrorPath": "\(home)/.opProxy/launchd.log",
+            "StandardOutPath": "\(home)/.opProxy/launchd.log",
+        ]
+        try FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try PropertyListSerialization.data(fromPropertyList: agent, format: .xml, options: 0).write(to: plist, options: .atomic)
+        launchctl(["bootout", "\(domain)/\(label)"])
+        // bootout returns before the job is fully gone; bootstrapping too early fails with EIO.
+        for _ in 0..<50 where launchctl(["print", "\(domain)/\(label)"]).status == 0 { usleep(100_000) }
+        try? FileManager.default.removeItem(at: paths.socket)
+        // A disabled agent (Open at Login unchecked) can't be bootstrapped: enable it to start
+        // it now, then put the choice back, since disabling only affects future logins.
+        let wasDisabled = !opensAtLogin
+        setOpensAtLogin(true)
+        launchctl(["bootstrap", domain, plist.path])
+        if wasDisabled { setOpensAtLogin(false) }
+        for _ in 0..<50 where !FileManager.default.fileExists(atPath: paths.socket.path) { usleep(100_000) }
+    }
+
+    /// Opening opProxy.app (Finder, `open`): installs the agent if this Mac has none (or its
+    /// program is gone), starts the daemon if it isn't running, and has it show Setup.
+    static func startFromAppLaunch(paths: Paths, executable: String) -> Never {
+        Setup.linkCommands(to: executable)
+        if installedProgram.map({ !FileManager.default.fileExists(atPath: $0) }) ?? true {
+            do { try install(executable: executable, paths: paths) } catch { fail("could not install the background agent: \(error)") }
+        } else if UnixSocket.connect(path: paths.socket.path).map({ close($0) }) == nil {
+            if launchctl(["kickstart", "\(domain)/\(label)"]).status != 0 { launchctl(["bootstrap", domain, plist.path]) }
+            for _ in 0..<50 where !FileManager.default.fileExists(atPath: paths.socket.path) { usleep(100_000) }
         }
+        _ = daemonStatus(.showSetup)
         exit(0)
     }
 

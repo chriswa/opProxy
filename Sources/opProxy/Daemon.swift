@@ -357,6 +357,8 @@ final class Daemon {
         }
     }
 
+    /// Opens the Setup window. Set by main.
+    var onShowSetup: (() -> Void)?
     /// Opens the pairing QR code; nil when this build can't use CloudKit.
     var onPairPhone: (() -> Void)?
 
@@ -374,6 +376,9 @@ final class Daemon {
         case .proxy(let request): reply = try? JSONEncoder().encode(handle(request, peer: peer, fd: fd))
         case .status: reply = try? JSONEncoder().encode(status())
         case .refresh: reply = try? JSONEncoder().encode(status(error: auth.refresh()))
+        case .showSetup:
+            if let onShowSetup { DispatchQueue.main.async(execute: onShowSetup) }
+            reply = try? JSONEncoder().encode(status())
         case .pairPhone:
             let error = onPairPhone == nil ? "This opProxy build can't use iCloud: run scripts/provision-mac.sh, then install.sh." : nil
             if let onPairPhone { DispatchQueue.main.async(execute: onPairPhone) }
