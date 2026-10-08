@@ -1,4 +1,4 @@
-// Draws the iPhone app's icon: a hazard-yellow key under a stripe band, in the app's colours. Run: swift phone/make-icon.swift
+// Draws the iPhone app's icon: an agent and a key in hazard yellow under a stripe band, in the app's colours. Run: swift phone/make-icon.swift
 import AppKit
 
 let size: CGFloat = 1024
@@ -32,10 +32,30 @@ while x < size {
     stripe.fill()
     x += 140
 }
-let config = NSImage.SymbolConfiguration(pointSize: 470, weight: .semibold).applying(.init(paletteColors: [yellow]))
+// An agent (the robot, as drawn in the app) asking for a key.
+func robot(in r: NSRect) {
+    let w = r.width, h = r.height
+    func rect(_ x: CGFloat, _ y: CGFloat, _ rw: CGFloat, _ rh: CGFloat) -> NSRect {
+        // The app's drawing is top-down; flip into AppKit's bottom-up coordinates.
+        NSRect(x: r.minX + x * w, y: r.maxY - (y + rh) * h, width: rw * w, height: rh * h)
+    }
+    yellow.setFill()
+    NSBezierPath(rect: rect(0.47, 0.06, 0.06, 0.16)).fill()
+    NSBezierPath(ovalIn: rect(0.41, 0, 0.18, 0.18)).fill()
+    NSBezierPath(roundedRect: rect(0, 0.45, 0.1, 0.24), xRadius: w * 0.03, yRadius: w * 0.03).fill()
+    NSBezierPath(roundedRect: rect(0.9, 0.45, 0.1, 0.24), xRadius: w * 0.03, yRadius: w * 0.03).fill()
+    let head = NSBezierPath(roundedRect: rect(0.12, 0.24, 0.76, 0.66), xRadius: w * 0.16, yRadius: w * 0.16)
+    head.append(NSBezierPath(ovalIn: rect(0.28, 0.42, 0.14, 0.14)))
+    head.append(NSBezierPath(ovalIn: rect(0.58, 0.42, 0.14, 0.14)))
+    head.append(NSBezierPath(roundedRect: rect(0.34, 0.68, 0.32, 0.07), xRadius: 6, yRadius: 6))
+    head.windingRule = .evenOdd
+    head.fill()
+}
+robot(in: NSRect(x: 110, y: top / 2 - 190, width: 380, height: 380))
+let config = NSImage.SymbolConfiguration(pointSize: 300, weight: .semibold).applying(.init(paletteColors: [yellow]))
 let key = NSImage(systemSymbolName: "key.horizontal.fill", accessibilityDescription: nil)!.withSymbolConfiguration(config)!
 let ctx = NSGraphicsContext.current!.cgContext
-ctx.translateBy(x: size / 2, y: top / 2)
+ctx.translateBy(x: 720, y: top / 2)
 ctx.rotate(by: .pi / 4)
 key.draw(in: NSRect(x: -key.size.width / 2, y: -key.size.height / 2, width: key.size.width, height: key.size.height))
 NSGraphicsContext.restoreGraphicsState()
