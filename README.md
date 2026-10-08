@@ -2,6 +2,12 @@
 
 A drop-in `op` that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. You approve each secret once, with Touch ID, in a dialog that shows the item, who is asking and why, or from a paired iPhone running Secret Proxy, opProxy's iPhone app. Repeats then run silently for as long as you chose.
 
+## Why
+
+- **1Password's prompt doesn't say who's asking, or for what.** It asks you to unlock the CLI, but not which agent wants it or which item it will read. With several agents running, you can't tell which one is prompting you, and approving one approves them all. opProxy's dialog names the agent and its session, the item and vault, the exact command, and the agent's last message, so you know what you're allowing before you allow it.
+- **Answer from anywhere.** Requests also go to Secret Proxy on your iPhone, with a notification. Allow or deny without going back to your desk, and an agent working on its own isn't stuck waiting for you.
+- **Allow once, or for a while.** Allow a single read, or let one agent (or all of them) read that item for a day or for good. Repeats then run without asking.
+
 <table>
   <tr>
     <td><img src="docs/screenshots/iphone-request.png" width="240" alt="A request on the iPhone: Claude Code Agent asks for the GitHub token, with the command and its last message, and Allow and Deny to drag"></td>
