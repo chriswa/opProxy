@@ -46,7 +46,7 @@ struct RequestView: View {
                     }
                     // Well apart from who and what: there if wanted, quiet otherwise.
                     details(doc)
-                        .padding(.top, 56)
+                        .padding(.top, 28)
                         .padding(.horizontal, 16)
                         .padding(.bottom, 24)
                 }
@@ -69,7 +69,7 @@ struct RequestView: View {
     private static let iconWidth: CGFloat = 28
 
     private func header(_ doc: FeedDocument, tone: Color) -> some View {
-        VStack(alignment: .leading, spacing: 40) {
+        VStack(alignment: .leading, spacing: 48) {
             HStack(alignment: .top, spacing: 12) {
                 RobotIcon(color: tone).frame(width: Self.iconWidth, height: Self.iconWidth).padding(.top, 24)
                     .anchorPreference(key: IconBounds.self, value: .bounds) { ["robot": $0] }
@@ -111,8 +111,8 @@ struct RequestView: View {
                 if let robot = anchors["robot"].map({ geo[$0] }), let key = anchors["key"].map({ geo[$0] }) {
                     // The question mark sits in the gap between the two rows, below the agent's lines.
                     let gapTop = anchors["requester"].map { geo[$0].maxY } ?? robot.maxY
-                    AsksFor(tone: tone, from: CGPoint(x: robot.midX, y: robot.maxY + 6), to: CGPoint(x: key.midX, y: key.minY - 4),
-                            mark: (gapTop + key.minY) / 2)
+                    AsksFor(tone: tone, from: CGPoint(x: robot.midX, y: robot.maxY + 6), to: CGPoint(x: key.midX, y: key.minY - 8),
+                            mark: gapTop + (key.minY - gapTop) * 0.4)
                 }
             }
         }

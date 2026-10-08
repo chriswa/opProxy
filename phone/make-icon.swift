@@ -51,11 +51,32 @@ func robot(in r: NSRect) {
     head.windingRule = .evenOdd
     head.fill()
 }
-robot(in: NSRect(x: 110, y: top / 2 - 190, width: 380, height: 380))
-let config = NSImage.SymbolConfiguration(pointSize: 300, weight: .semibold).applying(.init(paletteColors: [yellow]))
+// The agent at the top left asks the key at the bottom right, along the app's dashed line.
+let robotRect = NSRect(x: 70, y: top - 70 - 440, width: 440, height: 440)
+let keyCenter = NSPoint(x: 700, y: 270)
+let line = NSBezierPath()
+line.move(to: NSPoint(x: robotRect.midX + 120, y: robotRect.minY + 10))
+line.line(to: NSPoint(x: keyCenter.x - 40, y: keyCenter.y + 150))
+line.lineWidth = 16
+line.lineCapStyle = .round
+line.setLineDash([2, 34], count: 2, phase: 0)
+yellow.setStroke()
+line.stroke()
+// The question mark's ring, halfway along.
+let mid = NSPoint(x: (robotRect.midX + 120 + keyCenter.x - 40) / 2, y: (robotRect.minY + 10 + keyCenter.y + 150) / 2)
+let ring = NSBezierPath(ovalIn: NSRect(x: mid.x - 58, y: mid.y - 58, width: 116, height: 116))
+NSColor(srgbRed: 0.12, green: 0.105, blue: 0.08, alpha: 1).setFill()
+ring.fill()
+ring.lineWidth = 14
+ring.stroke()
+let mark = NSAttributedString(string: "?", attributes: [
+    .font: NSFont.systemFont(ofSize: 92, weight: .heavy), .foregroundColor: yellow])
+mark.draw(at: NSPoint(x: mid.x - mark.size().width / 2, y: mid.y - mark.size().height / 2))
+robot(in: robotRect)
+let config = NSImage.SymbolConfiguration(pointSize: 420, weight: .semibold).applying(.init(paletteColors: [yellow]))
 let key = NSImage(systemSymbolName: "key.horizontal.fill", accessibilityDescription: nil)!.withSymbolConfiguration(config)!
 let ctx = NSGraphicsContext.current!.cgContext
-ctx.translateBy(x: 720, y: top / 2)
+ctx.translateBy(x: keyCenter.x, y: keyCenter.y)
 ctx.rotate(by: .pi / 4)
 key.draw(in: NSRect(x: -key.size.width / 2, y: -key.size.height / 2, width: key.size.width, height: key.size.height))
 NSGraphicsContext.restoreGraphicsState()
