@@ -2,6 +2,9 @@
 
 A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. When an agent asks for a secret, a dialog shows you the item, who is asking and why, and you answer there or on a paired iPhone running Secret Proxy, opProxy's iPhone app. Allow it just this once, so you're asked every time, or let that agent, or every agent, read that item for a day or for good.
 
+> [!WARNING]
+> opProxy is opinionated about discovery: commands that only list things (`item list`, `vault list` and the like) always run, without asking. They return no secret values, but they do let any agent see the names of the items in your vaults, their vaults, URLs and usernames. If that concerns you, don't use opProxy yet; a setting to ask for these too is planned.
+
 ## Why
 
 - **1Password's prompt doesn't say who's asking, or for what.** It asks you to unlock the CLI, but not which agent wants it or which item it will read. With several agents running, you can't tell which one is prompting you, and since agents run each command in a new session, the prompts keep coming. opProxy's dialog names the agent and its session, the item and vault, the exact command, and the agent's last message, so you know what you're allowing before you allow it.
