@@ -1,6 +1,6 @@
 # opProxy
 
-A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. You approve each secret once in a dialog that shows the item, who is asking and why, or from a paired iPhone running Secret Proxy, opProxy's iPhone app. Repeats then run silently for as long as you chose.
+A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. When an agent asks for a secret, a dialog shows you the item, who is asking and why, and you answer there or on a paired iPhone running Secret Proxy, opProxy's iPhone app. Allow it just this once, so you're asked every time, or let that agent, or every agent, read that item for a day or for good.
 
 ## Why
 
