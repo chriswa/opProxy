@@ -14,11 +14,7 @@ struct OpProxyPhoneApp: App {
                 .onAppear {
                     delegate.model = model
                     #if DEBUG
-                    // `-demo` opens the demo with a sample request, for screenshots in the simulator.
-                    if ProcessInfo.processInfo.arguments.contains("-demo") {
-                        model.startDemo()
-                        model.addDemoRequest()
-                    }
+                    if let shot = Screenshot.current { model.prepare(shot) }
                     #endif
                 }
                 .onChange(of: phase, initial: true) { _, phase in model.setActive(phase == .active) }
@@ -33,7 +29,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound, .badge, .timeSensitive]) { _, _ in }
+        #if DEBUG
+        // Screenshots skip the permission prompt, which would cover them.
+        let screenshot = Screenshot.current != nil
+        #else
+        let screenshot = false
+        #endif
+        if !screenshot { center.requestAuthorization(options: [.alert, .sound, .badge, .timeSensitive]) { _, _ in } }
         application.registerForRemoteNotifications()
         return true
     }

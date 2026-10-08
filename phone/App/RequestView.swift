@@ -57,6 +57,9 @@ struct RequestView: View {
         .foregroundStyle(Theme.text)
         .background(Theme.background)
         .overlay { if let answer { Acknowledgement(answer: answer) } }
+        #if DEBUG
+        .onAppear { if Screenshot.current == .allowed { answer = Answer(approved: true, confirmed: true) } }
+        #endif
         .onAppear {
             for picker in doc.pickers ?? [] where picks[picker.id] == nil {
                 picks[picker.id] = picker.default ?? picker.options.first?.id

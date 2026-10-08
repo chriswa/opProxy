@@ -7,9 +7,9 @@ import Foundation
 enum Demo {
     static let zone = CKRecordZone.ID(zoneName: CloudFeed.zoneName(macID: "demo"))
 
-    static func mac() -> MacFeed {
+    static func mac(zone: CKRecordZone.ID = zone, name: String = "Demo Mac") -> MacFeed {
         let now = Date().timeIntervalSince1970 * 1000
-        var mac = MacFeed(zoneID: zone, name: "Demo Mac")
+        var mac = MacFeed(zoneID: zone, name: name)
         mac.pairedKeys = [PhoneKey.keyId]
         mac.version = FeedModel.appVersion
         mac.presenceAt = Date()

@@ -105,6 +105,28 @@ final class FeedModel: ObservableObject {
         updateMac(Demo.zone) { $0.items.append(Demo.request(number: demoCount)) }
     }
 
+    #if DEBUG
+    /// Screenshots: fixed sample state that never reaches iCloud.
+    private var frozen = false
+
+    func prepare(_ shot: Screenshot) {
+        frozen = true
+        loaded = true
+        switch shot {
+        case .pairing, .guide, .confirm:
+            macs = [:]
+        case .request, .allowed:
+            var work = Demo.mac(name: "Work MacBook")
+            work.items = [Demo.request(number: 1)]
+            macs = [work.zoneID.zoneName: work]
+        case .macs:
+            let home = Demo.mac(zone: CKRecordZone.ID(zoneName: CloudFeed.zoneName(macID: "home")), name: "Home iMac")
+            let work = Demo.mac(name: "Work MacBook")
+            macs = [work.zoneID.zoneName: work, home.zoneID.zoneName: home]
+        }
+    }
+    #endif
+
     func exitDemo() {
         demo = false
         (macs, held, databaseToken, zoneTokens, subscribed) = ([:], nil, nil, [:], [])
@@ -228,6 +250,9 @@ final class FeedModel: ObservableObject {
     func refresh() async {
         // The demo's pretend Mac has nothing to fetch, and is always up to date.
         if demo { return update(\.loaded, true) }
+        #if DEBUG
+        if frozen { return }
+        #endif
         guard !refreshing else { return }
         refreshing = true
         defer {

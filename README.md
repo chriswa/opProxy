@@ -2,6 +2,39 @@
 
 A drop-in `op` that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. You approve each secret once, with Touch ID, in a dialog that shows the item, who is asking and why, or from a paired iPhone running Secret Proxy, opProxy's iPhone app. Repeats then run silently for as long as you chose.
 
+<table>
+  <tr>
+    <td><img src="docs/screenshots/iphone-request.png" width="240" alt="A request on the iPhone: Claude Code Agent asks for the GitHub token, with the command and its last message, and Allow and Deny to drag"></td>
+    <td><img src="docs/screenshots/iphone-allowed.png" width="240" alt="The request allowed, confirmed by the Mac"></td>
+    <td><img src="docs/screenshots/iphone-macs.png" width="240" alt="No pending requests, with two paired Macs and their 1Password authorization"></td>
+  </tr>
+  <tr>
+    <td>An agent asks for a secret: who, what, the exact command and its last message. Choose how long, then drag to allow or deny.</td>
+    <td>The Mac confirms it got your answer, and the agent's command goes through.</td>
+    <td>One phone answers for several Macs, each with how long its 1Password authorization has left.</td>
+  </tr>
+</table>
+
+## Architecture
+
+```mermaid
+flowchart LR
+    agent["AI agent<br/>Claude Code, Codex, Cursor"] -->|"op …"| shim["op<br/>(opProxy's shim, first on PATH)"]
+    shim --> daemon["opProxy daemon"]
+    daemon -->|"list, whoami, vault list…<br/>no secret values: always allowed"| op["1Password CLI<br/>in opProxy's authorized session"]
+    daemon -->|"read, item get, document get<br/>reveals a secret"| check{"Allowed already?"}
+    check -->|"yes, and not expired"| op
+    check -->|"no"| ask["Ask you<br/>Mac dialog (Touch ID) and paired iPhones"]
+    ask -->|"Deny, or no answer in 5 minutes"| refused["Refused"]
+    ask -->|"Allow: Once"| op
+    ask -->|"Allow: 1 Day or Forever<br/>for this agent or all agents"| store[("Approvals<br/>agent or all agents · item · expiry<br/>signed by the Mac's Secure Enclave or the phone")]
+    store --> check
+    store --> op
+    op --> vault[("1Password")]
+```
+
+Writes and anything opProxy doesn't recognise go straight to the real `op`, which asks 1Password itself. An approval covers one item, every field of it, through `read`, `item get` or `document get`, until it expires or you revoke it from the menu.
+
 ## How it works
 
 1Password scopes CLI authorization to the Unix session (`getsid`). Claude Code, Codex and Cursor start every tool call in a new session, so without opProxy every `op` call raises a 1Password Touch ID prompt that gives no context.
@@ -118,7 +151,21 @@ You need a Mac with the [1Password CLI](https://developer.1password.com/docs/cli
 - **TestFlight:** open [testflight.apple.com/join/6MFDbtVE](https://testflight.apple.com/join/6MFDbtVE) on the iPhone, install TestFlight if asked, then Secret Proxy. TestFlight builds expire after 90 days; newer ones arrive through TestFlight.
 - **App Store:** once it's approved, search for Secret Proxy. (Not yet released.)
 
-To pair: in the Mac's key menu, choose **Pair an iPhone…**; in the app, tap **Scan the Mac's code** and scan it; check the fingerprint matches on the Mac and confirm with Touch ID. To pair another Mac, use **Pair another Mac** on the app's empty queue. Without a Mac, **Try a demo** on the pairing screen shows how it works.
+To pair: in the Mac's key menu, choose **Pair an iPhone…**; in the app, tap **Scan the Mac's code** and scan it; check the fingerprint matches on the Mac and confirm with Touch ID.
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/iphone-pairing.png" width="200" alt="Pair with your Mac, with the phone's fingerprint"></td>
+    <td><img src="docs/screenshots/iphone-guide.png" width="200" alt="Where to find Pair an iPhone in the Mac's menu"></td>
+    <td><img src="docs/screenshots/iphone-confirm.png" width="200" alt="Pairing: confirm on the Mac with Touch ID"></td>
+  </tr>
+  <tr>
+    <td>Start on the phone.</td>
+    <td>Open the code on the Mac, then scan it.</td>
+    <td>Check the fingerprints match, and confirm with Touch ID on the Mac.</td>
+  </tr>
+</table>
+ To pair another Mac, use **Pair another Mac** on the app's empty queue. Without a Mac, **Try a demo** on the pairing screen shows how it works.
 
 The Mac and iPhone apps share a version, shown in the key menu and at the foot of the app's empty queue. The app warns when a paired Mac runs a different one: update whichever is behind.
 

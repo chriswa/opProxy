@@ -28,6 +28,17 @@ struct PairingView: View {
         }
         .foregroundStyle(Theme.text)
         .background(Theme.background)
+        #if DEBUG
+        .onAppear {
+            switch Screenshot.current {
+            case .guide: scanning = true
+            case .confirm:
+                busy = true
+                progress = "Confirm on the Mac: check it shows the fingerprint below, then use Touch ID."
+            default: break
+            }
+        }
+        #endif
         .sheet(isPresented: $scanning) {
             PairingGuide { payload in pair(payload) }
         }
