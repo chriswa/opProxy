@@ -99,30 +99,39 @@ Every request that would show the dialog is also published, over iCloud, to each
 
 ## Install
 
-**From a release:** download `opProxy-<version>.zip` from the GitHub releases, move `opProxy.app` to Applications and open it. It installs its background agent, links `op` and `opProxy` in `~/.opProxy/bin`, and opens Setup, which checks for the 1Password CLI, offers to put `~/.opProxy/bin` first on your PATH in `~/.zprofile` and `~/.zshrc`, and pairs an iPhone. Setup… in the menu (or `opProxy setup`) opens it again.
+You need a Mac with the [1Password CLI](https://developer.1password.com/docs/cli/get-started/) (`brew install 1password-cli`) and **Settings → Developer → Integrate with 1Password CLI** turned on in the 1Password app. The iPhone app is optional.
 
-`scripts/release.sh [--publish]` builds a release of the version in `VERSION` (`scripts/bump-version.sh` sets it, for both apps): from the committed source, signed with Developer ID and a Developer ID provisioning profile (for CloudKit), then notarized and stapled. `--publish` uploads it as a GitHub release. It needs Xcode signed in to the developer account and a `notarytool` profile named `opProxy`.
+### The Mac app
 
-**From source:**
+1. Download `opProxy-<version>.zip` from the [GitHub releases](https://github.com/chriswa/opProxy/releases) (the repo is private: ask for access).
+2. Unzip it, move `opProxy.app` to Applications, and open it.
+3. It installs its background agent, links `op` and `opProxy` in `~/.opProxy/bin`, and opens **Setup**, which:
+   - checks for the 1Password CLI;
+   - offers **Add to my shell**, which puts `~/.opProxy/bin` first on your PATH in `~/.zprofile` and `~/.zshrc`. Open a new terminal afterwards; agents already running keep their old PATH until restarted;
+   - lets you name this Mac, for a phone paired with several;
+   - pairs an iPhone.
+
+**Setup…** in the key menu (or `opProxy setup`) opens it again. Opening a newer `opProxy.app` replaces the running one. On first start, macOS asks to let opProxy "access data from other apps" (the 1Password CLI reads 1Password's group container), and 1Password asks you to authorize it.
+
+### The iPhone app (Secret Proxy)
+
+- **TestFlight:** open [testflight.apple.com/join/6MFDbtVE](https://testflight.apple.com/join/6MFDbtVE) on the iPhone, install TestFlight if asked, then Secret Proxy. TestFlight builds expire after 90 days; newer ones arrive through TestFlight.
+- **App Store:** once it's approved, search for Secret Proxy. (Not yet released.)
+
+To pair: in the Mac's key menu, choose **Pair an iPhone…**; in the app, tap **Scan the Mac's code** and scan it; check the fingerprint matches on the Mac and confirm with Touch ID. To pair another Mac, use **Pair another Mac** on the app's empty queue. Without a Mac, **Try a demo** on the pairing screen shows how it works.
+
+The Mac and iPhone apps share a version, shown in the key menu and at the foot of the app's empty queue. The app warns when a paired Mac runs a different one: update whichever is behind.
+
+### From source
 
 ```
+scripts/provision-mac.sh   # once, and yearly: the CloudKit provisioning profile (needs xcodegen and Xcode signed in to the team)
 ./install.sh
 ```
 
-The script:
-1. Builds the release binary.
-2. Creates this Mac's Secure Enclave approval key on the first run and pins its public key into the build (`Sources/opProxy/ApprovalKeyPin.swift`, per-Mac and untracked).
-3. Wraps the binary in `bin/opProxy.app` (bundle ID `com.chriswa.opproxy`, hardened runtime) and signs it with `scripts/sign-app.sh`. With the CloudKit provisioning profile from `scripts/provision-mac.sh`, it embeds the profile and signs with its certificate and CloudKit entitlements, which the iPhone app needs. Without one, it signs like VoiceOp and Claude Usage Tray, with the first `Developer ID Application|Apple Development` identity, and works without a phone.
-4. Links `bin/op` and `bin/opProxy` into the bundle.
-5. Writes and restarts the LaunchAgent (`~/Library/LaunchAgents/com.chriswa.opproxy.plist`), keeping your Open at Login choice.
+`install.sh` builds the release binary, wraps it in `bin/opProxy.app`, signs it with `scripts/sign-app.sh` (with the profile, so it can use CloudKit and the iPhone app; without one it works without a phone), and installs and restarts its LaunchAgent (`~/Library/LaunchAgents/com.chriswa.opproxy.plist`), keeping your Open at Login choice. Without the profile, it pins this Mac's Secure Enclave approval key into the build (`Sources/opProxy/ApprovalKeyPin.swift`, per-Mac and untracked).
 
-`scripts/provision-mac.sh` needs `xcodegen` and Xcode signed in to the developer account. Run it once before `install.sh`, and again when the profile expires after a year.
-
-The iPhone app is `phone/project.yml`: run `xcodegen generate` in `phone/` and open `OpProxyPhone.xcodeproj`.
-
-`~/.zshrc` and `~/.zprofile` prepend `~/opProxy/bin` to PATH. Agent sessions that started before that change keep their old PATH until they restart.
-
-Every daemon start brings a macOS "access data from other apps" dialog: `op` reads 1Password's group container, and macOS charges that to opProxy. 1Password's prompt follows.
+Building releases and the iPhone app is in `CLAUDE.md`.
 
 ```
 opProxy status | refresh

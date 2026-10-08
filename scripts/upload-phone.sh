@@ -1,6 +1,7 @@
 #!/bin/bash
-# Archives the iPhone app at the repo's VERSION and uploads it to App Store Connect for
-# TestFlight: scripts/upload-phone.sh. Needs Xcode signed in to the developer account. Every
+# Archives the iPhone app at the repo's VERSION, uploads it to App Store Connect, and hands it to
+# testflight.sh, which puts it in the Coworkers group and submits it for beta review:
+# scripts/upload-phone.sh. Needs Xcode signed in to the developer account. Every
 # upload gets a new build number, from the time, since App Store Connect refuses repeats.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -28,4 +29,5 @@ xcodebuild -project "$ROOT/phone/OpProxyPhone.xcodeproj" -scheme OpProxyPhone -c
 echo "== uploading"
 xcodebuild -exportArchive -archivePath "$OUT/SecretProxy.xcarchive" -exportOptionsPlist "$OUT/export.plist" \
     -exportPath "$OUT/export" -allowProvisioningUpdates -quiet
-echo "== uploaded $VERSION ($BUILD); it appears in TestFlight once Apple has processed it"
+echo "== uploaded $VERSION ($BUILD); waiting for Apple to process it"
+"$ROOT/scripts/testflight.sh"
