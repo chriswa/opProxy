@@ -67,7 +67,7 @@ enum DialogPreview {
         contactSheet(shots, to: dir.appendingPathComponent("setup-themes.png"))
         let session = AgentSession(agent: .claude, sessionId: "c7d70e94-8847-4d74-b674-231862575006")
         let label = RequesterLabel(name: "Kevin", title: "opProxy menu bar + hardening",
-                                   openURL: URL(string: "spaceterm-surface://60af98d7-fdba-42a0-bb45-e02c94476075"),
+                                   openURL: URL(string: "example-terminal://60af98d7-fdba-42a0-bb45-e02c94476075"),
                                    id: "60af98d7-fdba-42a0-bb45-e02c94476075")
         let linear = ItemIdentity(itemId: "h3j8k1m6n4p9r2s7t5v0w8x3yz", vaultId: "q4a7m2x9c1v6b3n8z5k0w2e7rt",
                                   title: "Issue Tracker API key", vaultName: "Private")

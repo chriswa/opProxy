@@ -28,7 +28,7 @@ public struct Paths {
 
     /// Secure Enclave key blob that signs approvals.
     public var approvalKey: URL { stateDir.appendingPathComponent("approval-key.se") }
-    /// Where pending approvals are published for the Spaceterm phone app (APPROVAL_FEED.md).
+    /// Test builds: where the feed is published for the integration tests' stand-in phone.
     public var approvalFeed: URL { stateDir.appendingPathComponent("approval-feed.sock") }
     /// This Mac's ID for paired phones (MacIdentity).
     public var macID: URL { stateDir.appendingPathComponent("mac-id") }

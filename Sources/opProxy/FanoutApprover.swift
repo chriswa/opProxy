@@ -50,7 +50,7 @@ final class FanoutApprover: Approver {
 
     private static func macNote(_ decision: Decision) -> String {
         switch decision {
-        case .approved: return "Approved on the Mac"
+        case .approved: return "Allowed on the Mac"
         case .denied: return "Denied on the Mac"
         case .timedOut: return "Timed out"
         }

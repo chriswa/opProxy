@@ -1,10 +1,12 @@
+#if OPPROXY_TESTING
 import Darwin
 import Foundation
 import OpProxyCore
 
-/// The approval feed on a Unix socket (`Paths.approvalFeed`), which Spaceterm relays to its
-/// phone app: newline-delimited JSON, the full state on every connection (APPROVAL_FEED.md).
-/// Client state lives on the feed's queue.
+/// The approval feed on a Unix socket (`Paths.approvalFeed`), for the integration tests'
+/// stand-in phone (`opProxy test-feed-client`): newline-delimited JSON, the full state on
+/// every connection. Test builds only; phones use `CloudTransport`. Client state lives on the
+/// feed's queue.
 final class FeedSocket: FeedTransport {
     private let path: URL
     private let log: Log
@@ -69,3 +71,4 @@ final class FeedSocket: FeedTransport {
         if !UnixSocket.writeAll(fd, data + Data("\n".utf8)) { shutdown(fd, SHUT_RDWR) }
     }
 }
+#endif

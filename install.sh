@@ -26,13 +26,6 @@ rm -f "$ROOT/bin/opProxy"
 ln -sfn opProxy.app/Contents/MacOS/opProxy "$ROOT/bin/opProxy"
 ln -sfn opProxy.app/Contents/MacOS/opProxy "$ROOT/bin/op"
 mkdir -p "$HOME/.opProxy" && chmod 700 "$HOME/.opProxy"
-# With Spaceterm installed, name agents the way it does, unless a config already says otherwise.
-if [ -d "$HOME/.spaceterm" ] && [ ! -e "$HOME/.opProxy/config.json" ]; then
-    cat > "$HOME/.opProxy/config.json" <<CONFIG
-{"requesterLabel": {"command": ["$ROOT/scripts/spaceterm-label.py"],
-                    "environment": ["SPACETERM_NODE_ID", "SPACETERM_SURFACE_ID"]}}
-CONFIG
-fi
 
 # Writes the LaunchAgent and (re)starts the daemon, as opening the app does on a Mac without one.
 "$EXE" install-agent

@@ -101,7 +101,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             case .some(let date): expiry = "expires \(time.string(from: date))"
             case .none: expiry = "lapses after \(Int(TerminalApprovals.defaultIdle / 60)) idle minutes"
             }
-            info.append("Approved \(time.string(from: approval.approvedAt)) · " + expiry)
+            info.append("Allowed \(time.string(from: approval.approvedAt)) · " + expiry)
             for line in info {
                 let infoItem = NSMenuItem(title: line, action: nil, keyEquivalent: "")
                 infoItem.isEnabled = false

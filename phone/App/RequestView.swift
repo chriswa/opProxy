@@ -69,7 +69,7 @@ struct RequestView: View {
     private static let iconWidth: CGFloat = 28
 
     private func header(_ doc: FeedDocument, tone: Color) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 40) {
             HStack(alignment: .top, spacing: 12) {
                 RobotIcon(color: tone).frame(width: Self.iconWidth, height: Self.iconWidth).padding(.top, 24)
                     .anchorPreference(key: IconBounds.self, value: .bounds) { ["robot": $0] }
@@ -83,6 +83,7 @@ struct RequestView: View {
                         Text(line).font(.subheadline).foregroundStyle(Theme.dim).lineLimit(2)
                     }
                 }
+                .anchorPreference(key: IconBounds.self, value: .bounds) { ["requester": $0] }
                 Spacer(minLength: 0)
                 if waiting > 0 {
                     Text("\(waiting) more").font(.footnote.monospacedDigit()).foregroundStyle(Theme.dim).padding(.top, 8)
@@ -91,7 +92,7 @@ struct RequestView: View {
             HStack(alignment: .top, spacing: 12) {
                 // The app icon's key: horizontal, turned so its bow is at the top right.
                 Image(systemName: "key.horizontal.fill")
-                    .font(.system(size: 18))
+                    .font(.system(size: 25, weight: .semibold))
                     .rotationEffect(.degrees(-45))
                     .foregroundStyle(tone)
                     .frame(width: Self.iconWidth, height: Self.iconWidth)
@@ -108,7 +109,10 @@ struct RequestView: View {
         .overlayPreferenceValue(IconBounds.self) { anchors in
             GeometryReader { geo in
                 if let robot = anchors["robot"].map({ geo[$0] }), let key = anchors["key"].map({ geo[$0] }) {
-                    AsksFor(tone: tone, from: CGPoint(x: robot.midX, y: robot.maxY + 6), to: CGPoint(x: key.midX, y: key.minY - 4))
+                    // The question mark sits in the gap between the two rows, below the agent's lines.
+                    let gapTop = anchors["requester"].map { geo[$0].maxY } ?? robot.maxY
+                    AsksFor(tone: tone, from: CGPoint(x: robot.midX, y: robot.maxY + 6), to: CGPoint(x: key.midX, y: key.minY - 4),
+                            mark: (gapTop + key.minY) / 2)
                 }
             }
         }
@@ -175,8 +179,7 @@ struct RequestView: View {
                 Text(error).font(.footnote).foregroundStyle(Theme.danger)
             }
             if let approve, let deny {
-                // "Allow", matching the choices above it, whatever the Mac calls the action.
-                DualSwipe(approve: "Allow", deny: deny.label, expires: item.expires, answer: answer,
+                DualSwipe(approve: approve.label, deny: deny.label, expires: item.expires, answer: answer,
                           onApprove: { send(approve.id) }, onDeny: { send(deny.id) })
             }
             HStack(spacing: 10) {
@@ -438,6 +441,7 @@ private struct SectionView: View {
 /// answered, the knob rests at the far end.
 struct DualSwipe: View {
     static let knob: CGFloat = 52
+    private static let space = "dualSwipe"
 
     let approve: String
     let deny: String
@@ -470,6 +474,7 @@ struct DualSwipe: View {
                 knob(.deny, travel: travel, side: side, answered: answered)
             }
             .animation(.easeOut(duration: 0.15), value: side)
+            .coordinateSpace(name: Self.space)
         }
         .frame(height: Self.knob + 8)
         .allowsHitTesting(answer == nil)
@@ -497,7 +502,8 @@ struct DualSwipe: View {
     /// At rest: each answer's word on a dim arrow pointing to the far side, the countdown
     /// between them.
     private func labels(width: CGFloat) -> some View {
-        let arrow = width * 0.42
+        // Three quarters of the way from the knob to the middle.
+        let arrow = (width / 2 - Self.knob / 2 - 4) * 0.75 + Self.knob / 2
         return ZStack {
             HStack(spacing: 0) {
                 ArrowLabel(text: approve, color: Theme.approve, pointsRight: true).frame(width: arrow)
@@ -525,7 +531,9 @@ struct DualSwipe: View {
             .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
             // Only the knob itself takes touches, so each knob answers only for itself.
             .contentShape(Circle())
-            .gesture(DragGesture(minimumDistance: 0)
+            // Measured against the whole control, which stays put: measured against the knob,
+            // which moves as it's dragged, each step would shift the next.
+            .gesture(DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
                 .onChanged { drag in
                     if dragging == nil {
                         dragging = which
@@ -561,7 +569,7 @@ private struct ArrowLabel: View {
 
     var body: some View {
         ZStack(alignment: pointsRight ? .leading : .trailing) {
-            BlockArrow(pointsRight: pointsRight).fill(color.opacity(0.16)).frame(height: 30)
+            BlockArrow(pointsRight: pointsRight).fill(color.opacity(0.16)).frame(height: 45)
             Text(text)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color)
@@ -600,7 +608,8 @@ private struct BlockArrow: Shape {
     }
 }
 
-/// Where the header's robot and key icons landed, so a line can join them.
+/// Where the header's robot and key icons, and the agent's lines, landed, so a line can join
+/// the icons with its question mark below the agent's lines.
 private struct IconBounds: PreferenceKey {
     static let defaultValue: [String: Anchor<CGRect>] = [:]
     static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
@@ -613,9 +622,11 @@ private struct AsksFor: View {
     let tone: Color
     let from: CGPoint
     let to: CGPoint
+    /// How far down the line the question mark sits.
+    let mark: CGFloat
 
     var body: some View {
-        let mid = CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2)
+        let mid = CGPoint(x: from.x + (to.x - from.x) * (mark - from.y) / max(to.y - from.y, 1), y: mark)
         ZStack {
             Path { path in
                 path.move(to: from)

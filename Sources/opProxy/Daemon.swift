@@ -59,7 +59,7 @@ enum ApprovalOptions {
             return ([
                 once,
                 ApprovalOption(id: "tab", label: "This Terminal Tab", scope: .tab,
-                               hint: "Approves reads from this terminal tab until it's unused for 10 minutes (12 hours at most)."),
+                               hint: "Allows reads from this terminal tab until it's unused for 10 minutes (12 hours at most)."),
             ], 1)
         }
     }
@@ -72,13 +72,13 @@ enum ApprovalOptions {
     private static func hint(_ lifetime: ApprovalLifetime, _ reach: ApprovalReach, agent: AgentKind) -> String {
         switch (lifetime, reach) {
         case (.day, .thisAgent):
-            return "Approves every field of this item for this \(agent.displayName) session for 1 day, including if the session is resumed."
+            return "Allows every field of this item for this \(agent.displayName) session for 1 day, including if the session is resumed."
         case (.day, .allAgents):
-            return "Approves every field of this item for every Claude Code, Codex and Cursor session for 1 day."
+            return "Allows every field of this item for every Claude Code, Codex and Cursor session for 1 day."
         case (.forever, .thisAgent):
-            return "Approves every field of this item for this \(agent.displayName) session until you revoke it, including if the session is resumed."
+            return "Allows every field of this item for this \(agent.displayName) session until you revoke it, including if the session is resumed."
         case (.forever, .allAgents):
-            return "Approves every field of this item for every agent session until you revoke it."
+            return "Allows every field of this item for every agent session until you revoke it."
         }
     }
 }

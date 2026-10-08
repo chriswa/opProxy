@@ -10,9 +10,8 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/oppck.XXXXXX")
 export OPPROXY_HOME="$WORK/state"
 export OPPROXY_REAL_OP="$WORK/real-op"
 mkdir -p "$OPPROXY_HOME"
-unset SPACETERM_NODE_ID SPACETERM_SURFACE_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID \
+unset CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID \
     CURSOR_CONVERSATION_ID CURSOR_AGENT_CHAT_ID
-export SPACETERM_HOME="$WORK/no-spaceterm"
 
 # CloudKit only works in a signed bundle with the provisioning profile.
 APP="$WORK/opProxy.app"

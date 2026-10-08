@@ -82,9 +82,13 @@ case "daemon":
     auth.promptObserver = authContext
     do { try daemon.start() } catch { fail("could not start: \(error)") }
     feed.authStatus = { (auth.current, auth.isRefreshing) }
-    // CloudKit needs a build signed with the provisioning profile; others serve Spaceterm only.
+    // CloudKit needs a build signed with the provisioning profile; without it there's no phone.
     let cloud = CloudTransport.available ? CloudTransport(linksURL: paths.cloudLinks, log: log) : nil
-    feed.start([FeedSocket(path: paths.approvalFeed, log: log)] + [cloud].compactMap { $0 })
+    var transports: [FeedTransport] = [cloud].compactMap { $0 }
+    #if OPPROXY_TESTING
+    transports.append(FeedSocket(path: paths.approvalFeed, log: log))
+    #endif
+    feed.start(transports)
     let pairing = cloud.map { CloudPairing(transport: $0, log: log, paths: paths) }
     daemon.onPairPhone = pairing.map { pairing in { pairing.start() } }
     daemon.onShowSetup = { SetupWindow.show(paths: paths, pairing: pairing) }

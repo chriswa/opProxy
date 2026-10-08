@@ -20,7 +20,7 @@ public enum CloudFeed {
         public static let type = "FeedItem"
         /// The item as APPROVAL_FEED.md writes it, as a JSON string.
         public static let item = "item"
-        /// Set once the item is no longer pending: why ("Approved on the Mac").
+        /// Set once the item is no longer pending: why ("Allowed on the Mac").
         public static let note = "note"
     }
 

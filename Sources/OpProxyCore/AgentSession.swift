@@ -16,7 +16,7 @@ public enum AgentKind: String, Codable, CaseIterable {
         switch self {
         case .claude: return ["CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID"]
         case .codex: return ["CODEX_THREAD_ID"]
-        // Spaceterm keys Cursor surfaces by conversation ID.
+        // The conversation ID is the one that survives resuming a Cursor chat.
         case .cursor: return ["CURSOR_CONVERSATION_ID", "CURSOR_AGENT_CHAT_ID"]
         }
     }

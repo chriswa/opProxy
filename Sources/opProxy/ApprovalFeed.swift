@@ -268,7 +268,7 @@ final class ApprovalFeed {
         guard item.decide(decision) else { return "That request was already answered." }
         let approved = statement.action == "approve"
         log.write("phone \(statement.action)\(approved ? " " + (pick ?? "") : ""): \(device.name) (\(keyId.prefix(8))) item \(id.prefix(8))")
-        finish(id, note: approved ? "Approved on the phone" : "Denied on the phone")
+        finish(id, note: approved ? "Allowed on the phone" : "Denied on the phone")
         return nil
     }
 

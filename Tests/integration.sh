@@ -12,11 +12,9 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/opp.XXXXXX")
 export OPPROXY_HOME="$WORK/state"
 export OPPROXY_REAL_OP="$WORK/real-op"
 mkdir -p "$WORK/bin" "$OPPROXY_HOME"
-# Run the same inside an agent or a Spaceterm surface as anywhere else: tests that want a
-# session or a surface set these themselves, and the daemon never reaches the real Spaceterm.
-unset SPACETERM_NODE_ID SPACETERM_SURFACE_ID CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID \
+# Run the same inside an agent as anywhere else: tests that want a session set it themselves.
+unset CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID \
     CURSOR_CONVERSATION_ID CURSOR_AGENT_CHAT_ID
-export SPACETERM_HOME="$WORK/no-spaceterm"
 ln -s "$BIN" "$WORK/bin/op"
 OP="$WORK/bin/op"
 LOG="$OPPROXY_HOME/daemon.log"
@@ -471,40 +469,22 @@ check "disabled: straight to the real op" not_daemon "$(agent "$OP" read op://a/
 "$BIN" enable >/dev/null
 check "enabled again: proxied" via_daemon "$(agent "$OP" read op://a/b/c)"
 
-# --- Spaceterm, through the label command: looked up by stable node ID; the agent's name is
-# shown but never stored
-mkdir -p "$WORK/st"
-python3 - "$WORK/st/scripts.sock" <<'PY' & SPACETERM_PID=$!
-import json, socket, sys
-s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1]); s.listen()
-while True:
-    c, _ = s.accept()
-    req = json.loads(c.makefile().readline())
-    reply = {"type": "script-get-node-result", "seq": req["seq"]}
-    if req["nodeId"] == "node-1":
-        reply |= {"node": {"name": "fix flaky tests"}, "agentName": "Kevin"}
-    else:
-        reply["error"] = "unknown-node"
-    c.sendall((json.dumps(reply) + "\n").encode()); c.close()
-PY
-for _ in $(seq 50); do [ -S "$WORK/st/scripts.sock" ] && break; sleep 0.1; done
+# --- the label command: names the agent in the dialog; the title is stored, the name never
+cat > "$WORK/label" <<'LABEL'
+#!/bin/bash
+# Names the agent from the variable the config forwards, as a terminal's own script would.
+input=$(cat)
+grep -q '"TERM_SURFACE":"s-1"' <<<"$input" && echo '{"name": "Kevin", "title": "fix flaky tests", "openURL": "example://s-1"}'
+LABEL
+chmod +x "$WORK/label"
 cat > "$OPPROXY_HOME/config.json" <<CONFIG
-{"requesterLabel": {"command": ["$ROOT/scripts/spaceterm-label.py"],
-                    "environment": ["SPACETERM_NODE_ID", "SPACETERM_SURFACE_ID"]}}
+{"requesterLabel": {"command": ["$WORK/label"], "environment": ["TERM_SURFACE"]}}
 CONFIG
-SPACETERM_HOME="$WORK/st" start_daemon approved
-SPACETERM_NODE_ID=node-1 SPACETERM_SURFACE_ID=pty-2 SID=sess-N agent "$OP" read op://n/a/me >/dev/null
-check "spaceterm: dialog shows the agent's name" grep -q '"headline":"Kevin".*"label":"fix flaky tests".*"requester":"Kevin (Claude Code)"' "$LOG"
-check "spaceterm: approval stores the title" grep -q '"sessionLabel" : "fix flaky tests"' "$OPPROXY_HOME/approvals.json"
-check "spaceterm: approval never stores the name" not_in Kevin "$OPPROXY_HOME/approvals.json"
-label() { SPACETERM_HOME="$WORK/st" "$ROOT/scripts/spaceterm-label.py" <<<"$1"; }
-check "spaceterm label: node ID wins over the pty ID" grep -q '"name": "Kevin"' \
-    <<<"$(label '{"environment": {"SPACETERM_SURFACE_ID": "pty-2", "SPACETERM_NODE_ID": "node-1"}}')"
-check "spaceterm label: unknown node keeps its link" grep -q '"openURL": "spaceterm-surface://node-9"' \
-    <<<"$(label '{"environment": {"SPACETERM_NODE_ID": "node-9"}}')"
-check "spaceterm label: agent outside a surface opens by session" grep -q 'spaceterm-surface://sess-Q' \
-    <<<"$(label '{"environment": {}, "agent": {"sessionId": "sess-Q"}}')"
-kill "$SPACETERM_PID" 2>/dev/null
+start_daemon approved
+TERM_SURFACE=s-1 SID=sess-N agent "$OP" read op://n/a/me >/dev/null
+check "label: dialog shows the agent's name" grep -q '"headline":"Kevin".*"label":"fix flaky tests".*"requester":"Kevin (Claude Code)"' "$LOG"
+check "label: approval stores the title" grep -q '"sessionLabel" : "fix flaky tests"' "$OPPROXY_HOME/approvals.json"
+check "label: approval never stores the name" not_in Kevin "$OPPROXY_HOME/approvals.json"
 rm "$OPPROXY_HOME/config.json"
 
 echo; echo "$PASS passed, $FAIL failed"

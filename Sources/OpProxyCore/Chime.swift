@@ -3,8 +3,6 @@ import Foundation
 /// The chime a request plays when its dialog opens: two bell notes rising a major sixth,
 /// the second held, like a question. Synthesized here rather than shipped as a file.
 ///
-/// Spaceterm's phone plays the same chime for these requests (`approvalRequested` in
-/// ~/spaceterm/src/mobile/cues.ts). Keep the two tables in step.
 public enum Chime {
     /// (start s, frequency Hz, decay time constant s)
     static let notes: [(start: Double, freq: Double, decay: Double)] = [(0.00, 587.33, 0.16), (0.12, 987.77, 0.42)]

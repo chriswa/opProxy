@@ -1,6 +1,6 @@
 # opProxy
 
-A drop-in `op` that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. You approve each secret once, with Touch ID, in a dialog that shows the item, who is asking and why, or from a paired iPhone running the opProxy app or Spaceterm. Repeats then run silently for as long as you chose.
+A drop-in `op` that puts one approval dialog in front of 1Password CLI reads from AI agents and terminals. You approve each secret once, with Touch ID, in a dialog that shows the item, who is asking and why, or from a paired iPhone running Secret Proxy, opProxy's iPhone app. Repeats then run silently for as long as you chose.
 
 ## How it works
 
@@ -57,30 +57,29 @@ The daemon walks the caller's process ancestry, looking for the nearest **genuin
 
 ### Naming agents
 
-The app an agent runs in can name it in the dialog and on the phone. `~/.opProxy/config.json` names a command, and the variables the `op` shim should copy from the caller's environment for it:
+The terminal or tool an agent runs in can name it in the dialog and on the phone. `~/.opProxy/config.json` names a command, and the variables the `op` shim should copy from the caller's environment for it:
 
 ```json
-{"requesterLabel": {"command": ["/Users/me/opProxy/scripts/spaceterm-label.py"],
-                    "environment": ["SPACETERM_NODE_ID", "SPACETERM_SURFACE_ID"]}}
+{"requesterLabel": {"command": ["/Users/me/bin/name-my-agent"],
+                    "environment": ["MY_TERMINAL_TAB_ID"]}}
 ```
 
-For every request that asks you, the daemon runs the command with `{"environment": {…}, "pid": …, "cwd": …, "agent": {"kind", "sessionId", "pid"}}` on stdin, and reads `{"name", "title", "openURL", "id"}` from stdout. Every field is optional. `openURL` adds an **Open ↗** link to the dialog, and `id` is passed to phones as the document's `surfaceId`. The command has 1 second (`timeoutSeconds`, up to 5) and is re-read on every request. `install.sh` sets up `scripts/spaceterm-label.py` when Spaceterm is installed and there's no config yet.
+For every request that asks you, the daemon runs the command with `{"environment": {…}, "pid": …, "cwd": …, "agent": {"kind", "sessionId", "pid"}}` on stdin, and reads `{"name", "title", "openURL", "id"}` from stdout. Every field is optional. `openURL` adds an **Open ↗** link to the dialog, and `id` is passed to phones as the document's `surfaceId`. The command has 1 second (`timeoutSeconds`, up to 5) and is re-read on every request. Without a config, agents show as "Claude Code Agent" (or Codex, Cursor).
 
 ### Approving from your phone
 
-Every request that would show the dialog is also published for paired phones, in the format `~/spaceterm/APPROVAL_FEED.md` describes, two ways:
+Every request that would show the dialog is also published, over iCloud, to each iPhone paired with this Mac, in the format `APPROVAL_FEED.md` describes. The iPhone app is `phone/`.
 
-- **The opProxy iPhone app** (`phone/`), over iCloud. Each paired iPhone owns a CloudKit zone in its private database and shares it with the Mac. The Mac mirrors pending requests and the authorization status into it and reads the phone's replies from it. Every field is an encrypted CloudKit value, so only the user's own devices can read it, and the phone gets a time-sensitive notification for each new request, even when the app is closed. The Mac and phone can be on different Apple IDs.
-- **Spaceterm**, which relays the feed socket, `~/.opProxy/approval-feed.sock`, to its iPhone app.
-
-- **The authorization on the phone.** The feed also reports whether 1Password has authorized opProxy and until when, so the phone shows the time left on its bottom bar, and a notification when the authorization is lost.
-- **The same chime.** A new request rings the phone with the dialog's chime while Spaceterm is open on it.
-- **Same options as the desktop.** The phone shows what the dialog shows (the item, the request, the `op` command, the agent's shell command and last message, PIDs and directory) and offers the same choices as one list: **Once**, then **1 Day** and **Forever**, each for this agent or all agents, for agents; **Once · This Terminal Tab** for terminals.
-- **The first answer wins.** The dialog and the phone ask at the same time. Answer on either and the other one goes away; a late answer from the other side is refused. A request leaves the phone when it's answered anywhere or times out, and its countdown on the phone starts when its dialog appears on the Mac.
+- **One zone per Mac.** For each Mac it's paired with, the phone owns a CloudKit zone in its private database, shared with that Mac's iCloud account alone, so no Mac sees another's requests. The Mac mirrors its pending requests and status into the zone and reads the phone's replies from it. Every field is an encrypted CloudKit value, readable only by the devices involved. The Mac and phone can be on different Apple IDs.
+- **Notifications.** The phone gets a time-sensitive notification for each new request, even when the app is closed, naming the Mac it came from. With the app open, the request just appears.
+- **One request at a time.** The phone shows the oldest pending request, from any Mac, with who is asking (the Mac's name, the agent and its session), the item and its vault, then the exact command line and the agent's last message. Answering it, or its timing out, slides it away to reveal the next.
+- **Same choices as the desktop.** Allow **Once**, **1 Day** or **Forever**, for **This agent** or **All agents**; for terminals, **Once** or **This Tab**. Allow and Deny are one control: drag the green tick or the red cross all the way across.
+- **A sleeping Mac doesn't hold things up.** A Mac with pending requests says it's awake every 30 seconds. After 90 seconds without that, the phone moves its requests behind every other Mac's, marks them as not responding, and offers Dismiss. A Mac acts only on replies signed within the last minute, so an answer given before it slept can't take effect when it wakes.
+- **The first answer wins.** The dialog and the phone ask at the same time. Answer on either and the other one goes away; a late answer from the other side is refused. A request's countdown on the phone starts when its dialog appears on the Mac.
 - **Phone approvals work like Touch ID ones.** A lasting agent approval from the phone is stored and lasts just as long. It can't be signed by the Mac's Secure Enclave key without your Touch ID, so it's stored with the phone's own signed reply instead. That reply commits to the exact entry (which agents, item, approval time and expiry), so it can't be edited, moved to another request, widened to all agents or extended.
-- **Pairing the iPhone app.** Choose **Paired Phones → Pair an iPhone…** on the Mac (or run `opProxy pair-iphone`) and scan its QR code in the app. The code is one-time and lasts 10 minutes. The phone leaves its zone's share link in the container's public database, sealed with a key derived from the code under a name derived from it, so only someone who saw the code can find or open it. The Mac joins the zone, and the pairing below follows.
-- **Pairing.** The phone asks to pair over the feed. The Mac shows the phone's name and key fingerprint, with the approval dialog's chime; check the phone shows the same fingerprint, click **Pair…**, then touch Touch ID. The paired key is signed with the approval key, so nothing can pair a phone without your Touch ID.
-- **Unpairing.** `opProxy devices` lists paired phones with their fingerprints, and `opProxy unpair <key-id> | --all` (or the menu's **Paired Phones**) removes one. Unpairing a phone also ends every lasting approval made on it.
+- **Pairing.** Choose **Pair an iPhone…** in the Mac's menu (or run `opProxy pair-iphone`) and scan its QR code in the app. The code is one-time, lasts 10 minutes, and carries the Mac's iCloud account and its ID. The phone invites that account, and no one else, to a zone for that Mac (its share is never open to whoever holds the link), and leaves the invitation in the container's public database, sealed with a key derived from the code under a name derived from it. The Mac accepts, then asks you to confirm the phone: it shows the phone's name and key fingerprint; check the phone shows the same one, click **Pair…**, then touch Touch ID. The paired key is signed with the approval key, so nothing can pair a phone without your Touch ID.
+- **Naming the Mac.** Setup's "This Mac's name" sets what the phone calls it; until then, it's the computer's name.
+- **Unpairing.** On the phone, the empty queue lists the paired Macs, each with Unpair, which deletes that Mac's zone. On the Mac, `opProxy devices` lists paired phones with their fingerprints, and `opProxy unpair <key-id> | --all` (or the menu's **Paired Phones**) removes one. Unpairing a phone also ends every lasting approval made on it.
 
 ### Menu bar
 
@@ -113,7 +112,7 @@ Every request that would show the dialog is also published for paired phones, in
 The script:
 1. Builds the release binary.
 2. Creates this Mac's Secure Enclave approval key on the first run and pins its public key into the build (`Sources/opProxy/ApprovalKeyPin.swift`, per-Mac and untracked).
-3. Wraps the binary in `bin/opProxy.app` (bundle ID `com.chriswa.opproxy`, hardened runtime) and signs it with `scripts/sign-app.sh`. With the CloudKit provisioning profile from `scripts/provision-mac.sh`, it embeds the profile and signs with its certificate and CloudKit entitlements, which the iPhone app needs. Without one, it signs like VoiceOp and Claude Usage Tray, with the first `Developer ID Application|Apple Development` identity, and serves only Spaceterm.
+3. Wraps the binary in `bin/opProxy.app` (bundle ID `com.chriswa.opproxy`, hardened runtime) and signs it with `scripts/sign-app.sh`. With the CloudKit provisioning profile from `scripts/provision-mac.sh`, it embeds the profile and signs with its certificate and CloudKit entitlements, which the iPhone app needs. Without one, it signs like VoiceOp and Claude Usage Tray, with the first `Developer ID Application|Apple Development` identity, and works without a phone.
 4. Links `bin/op` and `bin/opProxy` into the bundle.
 5. Writes and restarts the LaunchAgent (`~/Library/LaunchAgents/com.chriswa.opproxy.plist`), keeping your Open at Login choice.
 
@@ -144,8 +143,8 @@ opProxy runs as your own user, with no root component. Every measure below assum
 - **Agents are recognized by code signatures, not the environment.** Only a process with its vendor's code signature counts as an agent.
   - A process renamed to `claude` isn't treated as an agent.
   - An agent that strips its session variables is still treated as an agent, not a terminal.
-- **Phone replies are signed by the phone.** Anything running as you can connect to the feed socket and to Spaceterm's, and anyone with a zone's share link can write to it, so the feed acts only on replies signed by a paired phone's key, for a request it has pending and a document it actually sent. Phone approvals stored for later carry that signed reply, which commits to the exact entry, and stop verifying once the phone is unpaired.
-- **Approvals can't be forged.** Each agent approval, including which agents it covers and its expiry, is signed by a Secure Enclave P-256 key that requires user presence for every signature. The private key can't leave this Mac's Secure Enclave. The daemon verifies entries against a public key compiled into the binary, so editing, replaying or adding entries in `approvals.json` does nothing, and swapping the key blob only breaks approvals.
+- **Phone replies are signed by the phone.** The feed acts only on replies signed by a paired phone's Secure Enclave key, within the last minute, for a request it has pending and a document it actually sent, so nothing else that can write to a zone can approve anything. Phone approvals stored for later carry that signed reply, which commits to the exact entry, and stop verifying once the phone is unpaired.
+- **Approvals can't be forged.** Each agent approval, including which agents it covers and its expiry, is signed by a Secure Enclave P-256 key that requires user presence for every signature. The private key can't leave this Mac's Secure Enclave. Builds signed with the provisioning profile keep the key in opProxy's own keychain access group, which only apps signed by its team can use, so an agent can't swap in a key or plant one before opProxy makes it. Other builds verify against a public key compiled in by `install.sh`. Either way, editing, replaying or adding entries in `approvals.json` does nothing.
 - **Only 1Password's `op` runs in the session.** Before each run, the daemon checks the `op` file's code signature against 1Password's team (2BUA8C4S2C). It then starts `op` suspended and resumes it only if the kernel's code hash for the loaded code matches the file it verified. Swapping `op` on disk, even mid-launch, gets the process killed before it executes.
 - **Only this build can hold the session.** A new session holder must have the same kernel-reported code hash as the running daemon, so a binary swapped into the bundle can't receive the next refresh's authorization.
 - **Minimal environment for `op`.** Nothing from launchd or the plist is inherited. Only display and account `OP_*` variables are forwarded; `OP_CONFIG_DIR` and biometric settings are dropped.
@@ -156,15 +155,14 @@ opProxy runs as your own user, with no root component. Every measure below assum
 ## Known security weaknesses
 
 **Can yield secrets without your Touch ID:**
-- **Keystrokes typed into an approved terminal tab.** A tab approval covers every read for 10 idle minutes, so anything that can type into that tab (for example Spaceterm's `ship-it`, or AppleScript with Automation permission) can run `op read … | curl …` there. This is by design and matches 1Password's own per-tab model.
+- **Keystrokes typed into an approved terminal tab.** A tab approval covers every read for 10 idle minutes, so anything that can type into that tab (for example a terminal's automation, or AppleScript with Automation permission) can run `op read … | curl …` there. This is by design and matches 1Password's own per-tab model.
 - **Reuse of approved items.** A prompt-injected agent can read any field of an item you approved for all agents, or for its own session, for the duration you chose. That's limited to those items.
 - **Session IDs can be claimed.** This-agent approvals follow the session ID in the caller's environment, which opProxy can't verify. An agent that sets `CLAUDE_CODE_SESSION_ID` (or runs `exec env …`) to another session's ID reaches that session's approvals, so in practice a this-agent approval is open to any agent that knows the session ID. Session IDs appear in transcript file names under `~/.claude/projects`.
 - **Metadata is free.** Item titles, vaults, URLs and usernames come back from listings without any dialog.
 - **Changes from the menu.** Anything with Accessibility permission could click the menu to extend an existing approval or widen it to all agents, since those changes reuse your last Touch ID. It can't create new approvals.
 
 **Can yield secrets from your phone, without Touch ID:**
-- **Phone approvals need no biometric.** The opProxy iPhone app signs a reply once you drag its slide control all the way across, while the phone is unlocked. The Spaceterm app signs a reply with its Secure Enclave key once you drag the slide control in its native panel all the way across. Neither Face ID nor Touch ID is involved.
-- **Only the native panel is trustworthy, in Spaceterm.** The rest of the request on Spaceterm's phone app (item, command, agent context) is drawn by Spaceterm's web page, which agents can modify. A modified page can show you a harmless-looking request while the native panel's one-line confirmation ("Let Claude Code … read …") and the option you chose describe what you're really approving. Read that line.
+- **Phone approvals need no biometric.** The iPhone app signs a reply once you drag Allow all the way across, while the phone is unlocked. Neither Face ID nor Touch ID is involved.
 - **A lost or stolen unlocked phone.** Anyone holding it unlocked, with the app open, can approve requests that are pending. Unpair it (`opProxy unpair`), which also ends the lasting approvals made on it.
 
 **Need your Touch ID, but could trick you into giving it:**

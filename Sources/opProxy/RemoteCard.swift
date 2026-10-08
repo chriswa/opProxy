@@ -5,7 +5,7 @@ import OpProxyCore
 /// the same order, for the phone to render. Built from the same prompt and options.
 enum RemoteCard {
     static let picker = "duration"
-    static let abandonedNotice = "The agent stopped waiting. Approving still lets its retry through."
+    static let abandonedNotice = "The agent stopped waiting. Allowing still lets its retry through."
 
     static func document(_ prompt: ApprovalPrompt, options: [ApprovalOption], defaultIndex: Int, abandoned: Bool) -> String {
         var doc: [String: Any] = [
@@ -25,7 +25,7 @@ enum RemoteCard {
             ]],
             "actions": [
                 ["id": "deny", "label": "Deny", "role": "deny"],
-                ["id": "approve", "label": "Approve", "role": "approve"],
+                ["id": "approve", "label": "Allow", "role": "approve"],
             ],
             "confirm": prompt.touchIDReason.prefix(1).uppercased() + prompt.touchIDReason.dropFirst(),
         ]

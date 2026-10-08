@@ -84,7 +84,7 @@ public struct Approval: Codable, Equatable {
     public let key: ApprovalKey
     public let approvedAt: Date
     public let expiresAt: Date
-    /// Spaceterm title at approval time, for `opProxy list` and the menu. Display only, so unsigned.
+    /// The requester label's title at approval time, for `opProxy list` and the menu. Display only, so unsigned.
     public let sessionLabel: String?
     /// The requester whose dialog granted an all-agents approval, so the menu can narrow it
     /// back to them. Display only, so unsigned: narrowing never grants more than the entry did.
