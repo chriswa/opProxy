@@ -30,6 +30,8 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_CFBundleDisplayName: Secret Proxy
         INFOPLIST_KEY_NSCameraUsageDescription: Scans the pairing code your Mac shows.
+        # Only standard signing and encryption (CryptoKit, iCloud), which is exempt.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         INFOPLIST_KEY_UIBackgroundModes: remote-notification
         TARGETED_DEVICE_FAMILY: "1"
     entitlements:

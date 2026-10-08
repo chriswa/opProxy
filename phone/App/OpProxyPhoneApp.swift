@@ -11,7 +11,16 @@ struct OpProxyPhoneApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(model)
-                .onAppear { delegate.model = model }
+                .onAppear {
+                    delegate.model = model
+                    #if DEBUG
+                    // `-demo` opens the demo with a sample request, for screenshots in the simulator.
+                    if ProcessInfo.processInfo.arguments.contains("-demo") {
+                        model.startDemo()
+                        model.addDemoRequest()
+                    }
+                    #endif
+                }
                 .onChange(of: phase, initial: true) { _, phase in model.setActive(phase == .active) }
         }
     }
