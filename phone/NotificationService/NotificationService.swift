@@ -24,6 +24,13 @@ final class NotificationService: UNNotificationServiceExtension {
                let item = FeedItem.parse(json), let doc = item.parsed {
                 content.title = doc.title
                 content.subtitle = doc.subtitle ?? ""
+                // Which Mac, for a phone paired with several: its name is in the zone's hello.
+                if let hello = try? await db.record(for: CKRecord.ID(recordName: CloudFeed.State.hello, zoneID: id.zoneID)),
+                   let json = hello.encryptedValues[CloudFeed.State.message] as? String,
+                   let message = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
+                   let name = (message["mac"] as? [String: Any])?["name"] as? String {
+                    content.subtitle = [content.subtitle, "on \(name)"].filter { !$0.isEmpty }.joined(separator: " · ")
+                }
                 content.body = doc.confirm
                 content.threadIdentifier = "requests"
                 content.userInfo["itemId"] = item.id

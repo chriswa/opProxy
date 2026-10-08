@@ -44,10 +44,22 @@ public struct OpProxyConfig: Decodable {
     }
 
     public let requesterLabel: Labeler?
+    /// What paired phones call this Mac (MacIdentity).
+    public let macName: String?
 
     public static func load(_ paths: Paths) -> OpProxyConfig? {
         guard let data = try? Data(contentsOf: paths.config) else { return nil }
         return try? JSONDecoder().decode(OpProxyConfig.self, from: data)
+    }
+
+    /// Sets the Mac's name, keeping every other setting in the file as it is; nil or blank
+    /// goes back to the computer's name.
+    public static func setMacName(_ name: String?, _ paths: Paths) throws {
+        var json = (try? Data(contentsOf: paths.config)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        json["macName"] = trimmed.isEmpty ? nil : String(trimmed.prefix(40))
+        try paths.ensureStateDir()
+        try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]).write(to: paths.config, options: .atomic)
     }
 
     /// The variables of `env` the label command asked for.

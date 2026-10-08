@@ -61,7 +61,8 @@ final class CloudTransport: FeedTransport {
         self.feed = feed
         let state = feed.state()
         lock.withLock {
-            mirror.state[CloudFeed.State.hello] = Self.string(FeedMessage.hello(pairedKeys: state.pairedKeys).json)
+            mirror.state[CloudFeed.State.hello] = Self.string(FeedMessage.hello(pairedKeys: state.pairedKeys, mac: state.mac).json)
+            mirror.state[CloudFeed.State.presence] = Self.presence()
             if let status = state.status { mirror.state[CloudFeed.State.status] = Self.string(FeedMessage.status(status).json) }
             for (id, item) in state.items { mirror.items[id] = (Self.string(item), nil, nil) }
         }
@@ -119,6 +120,7 @@ final class CloudTransport: FeedTransport {
                 }
             }
             prune()
+            refreshPresence()
             let quick = lock.withLock { mirror.pending } || pairingUntil > Date()
             await sleep(seconds: quick ? 1 : 30)
         }
@@ -231,6 +233,23 @@ final class CloudTransport: FeedTransport {
 
     private func database(_ link: CloudLink) -> CKDatabase {
         link.shared ? container.sharedCloudDatabase : container.privateCloudDatabase
+    }
+
+    /// While requests are pending, tells phones every `presenceInterval` that this Mac is
+    /// awake, so they can set aside requests from a Mac that has gone to sleep.
+    private var presenceWritten = Date.distantPast
+
+    private func refreshPresence() {
+        lock.withLock {
+            guard mirror.pending, Date().timeIntervalSince(presenceWritten) >= CloudFeed.State.presenceInterval else { return }
+            presenceWritten = Date()
+            mirror.state[CloudFeed.State.presence] = Self.presence()
+            for link in links { dirty[link.zoneID, default: []].insert(CloudFeed.State.presence) }
+        }
+    }
+
+    private static func presence() -> String {
+        string(["type": "presence", "aliveAt": Int64(Date().timeIntervalSince1970 * 1000)])
     }
 
     /// Removed items are forgotten after 10 minutes, and their records deleted.

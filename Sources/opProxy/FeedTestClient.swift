@@ -9,6 +9,7 @@ import OpProxyCore
 /// replies, and prints each reply-result line.
 ///   --unpaired     skip pairing
 ///   --tamper-hash  claim a document hash the feed never sent
+///   --stale        sign the statement as if two minutes ago
 ///   --twice        send the same reply again
 ///   --doc FILE     write the item's document there
 enum FeedTestClient {
@@ -61,7 +62,7 @@ enum FeedTestClient {
         var statement: [String: Any] = [
             "v": 1, "provider": "opProxy", "id": found["id"]!, "revision": found["revision"]!,
             "challenge": found["challenge"]!, "documentSha256": hash, "action": action, "picks": [String: String](),
-            "keyId": keyId, "signedAt": Int64(Date().timeIntervalSince1970 * 1000),
+            "keyId": keyId, "signedAt": Int64((Date().timeIntervalSince1970 - (args.contains("--stale") ? 120 : 0)) * 1000),
         ]
         if let pick { statement["picks"] = [RemoteCard.picker: pick] }
         let text = String(decoding: try! JSONSerialization.data(withJSONObject: statement, options: [.sortedKeys]), as: UTF8.self)

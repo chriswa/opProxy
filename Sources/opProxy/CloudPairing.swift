@@ -17,7 +17,10 @@ final class CloudPairing {
     var testPayloadFile: URL?
     private var task: Task<Void, Never>?
 
-    init(transport: CloudTransport, log: Log) {
+    private let paths: Paths
+
+    init(transport: CloudTransport, log: Log, paths: Paths) {
+        self.paths = paths
         self.transport = transport
         self.log = log
     }
@@ -68,7 +71,7 @@ final class CloudPairing {
         let me = try await container.userRecordID().recordName
         log.write("phone pairing: showing the code for iCloud user \(me.prefix(10))")
         let code = CloudFeed.Rendezvous.newCode()
-        let payload = CloudFeed.Rendezvous.qrPayload(code: code, macUser: me)
+        let payload = CloudFeed.Rendezvous.qrPayload(code: code, macUser: me, macID: MacIdentity.current(paths).id)
         await MainActor.run { [self] in
             let window = QRWindow(payload: payload) { [weak self] in self?.task?.cancel() }
             self.window = window

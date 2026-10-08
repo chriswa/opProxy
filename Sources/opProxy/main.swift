@@ -68,7 +68,7 @@ case "daemon":
     let signer = makeApprovalSigner(paths: paths, log: log)
     let devices = makePairedDeviceStore(paths: paths, signer: signer)
     // Every request is also published for paired phones; the first answer wins.
-    let feed = ApprovalFeed(log: log, devices: devices, confirmPairing:
+    let feed = ApprovalFeed(log: log, devices: devices, identity: { MacIdentity.current(paths) }, confirmPairing:
         Pairing.confirmer(devices: devices, signer: signer, autoPair: TestKnobs.value("OPPROXY_TEST_AUTO_PAIR") != nil))
     let approver = FanoutApprover(local: local, feed: feed)
     guard let executable = Bundle.main.executablePath else { fail("cannot find my own executable") }
@@ -85,7 +85,7 @@ case "daemon":
     // CloudKit needs a build signed with the provisioning profile; others serve Spaceterm only.
     let cloud = CloudTransport.available ? CloudTransport(linksURL: paths.cloudLinks, log: log) : nil
     feed.start([FeedSocket(path: paths.approvalFeed, log: log)] + [cloud].compactMap { $0 })
-    let pairing = cloud.map { CloudPairing(transport: $0, log: log) }
+    let pairing = cloud.map { CloudPairing(transport: $0, log: log, paths: paths) }
     daemon.onPairPhone = pairing.map { pairing in { pairing.start() } }
     daemon.onShowSetup = { SetupWindow.show(paths: paths, pairing: pairing) }
     if let file = TestKnobs.value("OPPROXY_TEST_CLOUD_PAIR"), let pairing {

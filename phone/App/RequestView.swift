@@ -12,8 +12,9 @@ struct RequestView: View {
     }
 
     @EnvironmentObject private var model: FeedModel
-    let item: FeedItem
+    let request: QueuedRequest
     let waiting: Int
+    private var item: FeedItem { request.item }
     @State private var picks: [String: String] = [:]
     @State private var error: String?
     @State private var answer: Answer?
@@ -69,8 +70,14 @@ struct RequestView: View {
 
     private func header(_ doc: FeedDocument, tone: Color) -> some View {
         VStack(alignment: .leading, spacing: 18) {
+            // Which Mac, for a phone paired with several.
+            Label(request.macName, systemImage: "laptopcomputer")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Theme.dim)
+                .labelStyle(MacLabelStyle(iconWidth: Self.iconWidth))
             HStack(alignment: .top, spacing: 12) {
                 RobotIcon(color: tone).frame(width: Self.iconWidth, height: Self.iconWidth).padding(.top, 4)
+                    .anchorPreference(key: IconBounds.self, value: .bounds) { ["robot": $0] }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(doc.requester?.name ?? doc.subtitle ?? "Someone")
                         .font(.system(size: 30, weight: .bold))
@@ -89,6 +96,7 @@ struct RequestView: View {
                     .font(.system(size: 20))
                     .foregroundStyle(tone)
                     .frame(width: Self.iconWidth, height: Self.iconWidth)
+                    .anchorPreference(key: IconBounds.self, value: .bounds) { ["key": $0] }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(doc.item?.title ?? doc.title).font(.title2.weight(.semibold)).lineLimit(2)
                     if let detail = doc.item?.detail {
@@ -98,6 +106,13 @@ struct RequestView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlayPreferenceValue(IconBounds.self) { anchors in
+            GeometryReader { geo in
+                if let robot = anchors["robot"].map({ geo[$0] }), let key = anchors["key"].map({ geo[$0] }) {
+                    AsksFor(tone: tone, from: CGPoint(x: robot.midX, y: robot.maxY + 6), to: CGPoint(x: key.midX, y: key.minY - 4))
+                }
+            }
+        }
         .padding(.horizontal, 16)
         .padding(.vertical, 16)
     }
@@ -125,42 +140,55 @@ struct RequestView: View {
     private func detail(_ label: String, @ViewBuilder _ content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(label).font(.caption.weight(.semibold))
-            content().textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+            content()
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.well, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.border.opacity(0.6)))
         }
         .foregroundStyle(Theme.dim)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: Choices and answers
 
-    /// The Deny button's width, which the choice rows' labels share, so the choices line up
-    /// with the slider.
-    static let sideColumn: CGFloat = 84
-    static let columnGap: CGFloat = 10
+    /// The swipe knob's width plus its inset, which the choice rows' labels share, so the
+    /// choices line up with the words beside the knob.
+    static let sideColumn: CGFloat = DualSwipe.knob + 4
+    static let columnGap: CGFloat = 8
 
     private func controls(_ doc: FeedDocument, tone: Color) -> some View {
         let approve = doc.actions.first { $0.role == "approve" }
-        let others = doc.actions.filter { $0.role != "approve" }
+        let deny = doc.actions.first { $0.role == "deny" }
+        let others = doc.actions.filter { $0.role != "approve" && $0.role != "deny" }
         return VStack(alignment: .leading, spacing: 12) {
+            if request.stuck {
+                HStack(alignment: .firstTextBaseline) {
+                    Label("\(request.macName) isn't responding. It may be asleep.", systemImage: "moon.zzz")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.dim)
+                    Spacer()
+                    Button("Dismiss") { model.dismiss(request) }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(tone)
+                }
+            }
             ForEach(doc.pickers ?? [], id: \.self) { picker in
                 PickerRows(picker: picker, choice: binding(picker), tone: tone)
             }
             if let error {
                 Text(error).font(.footnote).foregroundStyle(Theme.danger)
             }
+            if let approve, let deny {
+                DualSwipe(approve: approve.label, deny: deny.label, expires: item.expires, answer: answer,
+                          onApprove: { send(approve.id) }, onDeny: { send(deny.id) })
+            }
             HStack(spacing: Self.columnGap) {
                 ForEach(others, id: \.self) { action in
                     Button { send(action.id) } label: {
                         VStack(spacing: 1) {
                             Text(action.label).font(.subheadline.weight(.semibold))
-                            // The deny button carries the countdown: it's what happens at zero.
-                            if action.role == "deny", let expires = item.expires {
-                                TimelineView(.periodic(from: .now, by: 1)) { context in
-                                    Text(Self.clock(expires.timeIntervalSince(context.date)))
-                                        .font(.caption2.monospacedDigit())
-                                        .opacity(0.8)
-                                }
-                            }
                         }
                         .foregroundStyle(action.role == "deny" ? Theme.danger : Theme.text)
                         .frame(width: Self.sideColumn, height: 52)
@@ -169,9 +197,6 @@ struct RequestView: View {
                     }
                     .buttonStyle(PressScale())
                     .disabled(answer != nil)
-                }
-                if let approve {
-                    SlideToApprove(label: approve.label, done: answer?.approved == true) { send(approve.id) }
                 }
             }
         }
@@ -190,11 +215,11 @@ struct RequestView: View {
     private func send(_ action: String) {
         let approved = action == "approve"
         error = nil
-        model.hold(item)
+        model.hold(request)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { answer = Answer(approved: approved) }
         Task {
-            let failure = await model.answer(item, action: action, picks: approved ? picks.compactMapValues { $0 } : [:])
+            let failure = await model.answer(request, action: action, picks: approved ? picks.compactMapValues { $0 } : [:])
             guard failure == nil else {
                 withAnimation { answer = nil }
                 error = failure
@@ -209,7 +234,7 @@ struct RequestView: View {
         }
     }
 
-    private static func clock(_ seconds: TimeInterval) -> String {
+    static func clock(_ seconds: TimeInterval) -> String {
         let s = max(0, Int(seconds.rounded(.up)))
         return String(format: "%d:%02d", s / 60, s % 60)
     }
@@ -412,49 +437,153 @@ private struct SectionView: View {
     }
 }
 
-/// Approving takes a deliberate drag all the way across, so a stray tap can't approve. Once
-/// approved (`done`), the knob stays at the end and turns into a tick.
-struct SlideToApprove: View {
-    let label: String
-    let done: Bool
-    let action: () -> Void
+/// Approve and Deny in one control: a green tick on the left and a red cross on the right,
+/// each dragged all the way across to answer, so a stray touch can't do either. Touching one
+/// hides the other and marks where to drag it; letting go short sends it back. The countdown
+/// to timing out sits between them. Once answered, the knob rests at the far end.
+struct DualSwipe: View {
+    static let knob: CGFloat = 52
+
+    let approve: String
+    let deny: String
+    let expires: Date?
+    let answer: RequestView.Answer?
+    let onApprove: () -> Void
+    let onDeny: () -> Void
+
+    private enum Side { case approve, deny }
+    @State private var dragging: Side?
     @State private var offset: CGFloat = 0
 
     var body: some View {
         GeometryReader { geo in
-            let knob: CGFloat = 44
-            let travel = geo.size.width - knob - 8
-            let filled = done ? travel : offset
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.approve.opacity(0.18)).overlay(Capsule().stroke(Theme.approve.opacity(0.7)))
-                Capsule().fill(Theme.approve).frame(width: filled + knob + 8)
-                Text("Slide to \(label.lowercased())")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.approve)
-                    .frame(maxWidth: .infinity)
-                    .padding(.leading, knob)
-                    .opacity(done ? 0 : 1 - Double(offset / max(travel, 1)))
-                Circle().fill(.white).frame(width: knob, height: knob)
-                    .overlay(Image(systemName: done ? "checkmark" : "chevron.right.2")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(Theme.approve)
-                        .contentTransition(.symbolEffect(.replace)))
-                    .offset(x: 4 + filled)
-                    .gesture(DragGesture()
-                        .onChanged { offset = min(max(0, $0.translation.width), travel) }
-                        .onEnded { _ in
-                            if offset >= travel - 2 {
-                                action()
-                            } else {
-                                withAnimation(.spring) { offset = 0 }
-                            }
-                        })
+            let travel = geo.size.width - Self.knob - 8
+            let side = answer.map { $0.approved ? Side.approve : .deny } ?? dragging
+            let progress = answer != nil ? 1 : min(1, offset / max(travel, 1))
+            ZStack {
+                Capsule().fill(Theme.well).overlay(Capsule().stroke(Theme.border, lineWidth: 1.5))
+                if let side {
+                    let color = side == .approve ? Theme.approve : Theme.danger
+                    // The trail behind the knob, and where it has to go.
+                    Capsule().fill(color.opacity(0.22))
+                        .frame(width: Self.knob + 8 + travel * progress)
+                        .frame(maxWidth: .infinity, alignment: side == .approve ? .leading : .trailing)
+                    Circle().strokeBorder(color, style: StrokeStyle(lineWidth: 2, dash: [4, 4]))
+                        .frame(width: Self.knob, height: Self.knob)
+                        .padding(4)
+                        .frame(maxWidth: .infinity, alignment: side == .approve ? .trailing : .leading)
+                        .opacity(answer == nil ? 1 : 0)
+                    Text("Slide all the way to \((side == .approve ? approve : deny).lowercased())")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(color)
+                        .opacity(answer == nil ? 1 - progress : 0)
+                } else {
+                    labels
+                }
+                knob(.approve, travel: travel, side: side)
+                knob(.deny, travel: travel, side: side)
             }
-            .animation(.spring(response: 0.3), value: done)
-            // A refused answer slides the knob back.
-            .onChange(of: done) { _, done in if !done { withAnimation(.spring) { offset = 0 } } }
-            .allowsHitTesting(!done)
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: dragging == nil)
         }
-        .frame(height: 52)
+        .frame(height: Self.knob + 8)
+        .allowsHitTesting(answer == nil)
+    }
+
+    /// At rest: each answer's word with arrows toward the far side, and the countdown between.
+    private var labels: some View {
+        HStack(spacing: 6) {
+            Text("\(approve) ›››").foregroundStyle(Theme.approve)
+            Spacer(minLength: 4)
+            if let expires {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(RequestView.clock(expires.timeIntervalSince(context.date)))
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(Theme.dim)
+                }
+            }
+            Spacer(minLength: 4)
+            Text("‹‹‹ \(deny)").foregroundStyle(Theme.danger)
+        }
+        .font(.subheadline.weight(.semibold))
+        .padding(.horizontal, Self.knob + 12)
+    }
+
+    private func knob(_ which: Side, travel: CGFloat, side: Side?) -> some View {
+        let approving = which == .approve
+        let color = approving ? Theme.approve : Theme.danger
+        let moved = side == which ? (answer != nil ? travel : offset) : 0
+        return Circle().fill(color)
+            .frame(width: Self.knob, height: Self.knob)
+            .overlay(Image(systemName: approving ? "checkmark" : "xmark").font(.title3.weight(.bold)).foregroundStyle(Theme.stripeDark))
+            .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
+            .padding(4)
+            .offset(x: approving ? moved : -moved)
+            .frame(maxWidth: .infinity, alignment: approving ? .leading : .trailing)
+            .opacity(side == nil || side == which ? 1 : 0)
+            .gesture(DragGesture(minimumDistance: 0)
+                .onChanged { drag in
+                    if dragging == nil {
+                        dragging = which
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    }
+                    guard dragging == which else { return }
+                    offset = min(max(0, approving ? drag.translation.width : -drag.translation.width), travel)
+                }
+                .onEnded { _ in
+                    guard dragging == which else { return }
+                    if offset >= travel - 2 {
+                        approving ? onApprove() : onDeny()
+                    }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        dragging = nil
+                        offset = 0
+                    }
+                })
+    }
+}
+
+/// The Mac's name, with its icon in the same column as the robot and key below it.
+private struct MacLabelStyle: LabelStyle {
+    let iconWidth: CGFloat
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 12) {
+            configuration.icon.frame(width: iconWidth)
+            configuration.title
+        }
+    }
+}
+
+/// Where the header's robot and key icons landed, so a line can join them.
+private struct IconBounds: PreferenceKey {
+    static let defaultValue: [String: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+/// A dashed line from the agent down to the item, with a question mark halfway: it asks for it.
+private struct AsksFor: View {
+    let tone: Color
+    let from: CGPoint
+    let to: CGPoint
+
+    var body: some View {
+        let mid = CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2)
+        ZStack {
+            Path { path in
+                path.move(to: from)
+                path.addLine(to: to)
+            }
+            .stroke(tone.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [3, 4]))
+            Text("?")
+                .font(.caption.weight(.heavy))
+                .foregroundStyle(Theme.stripeDark)
+                .frame(width: 16, height: 16)
+                .background(tone, in: Circle())
+                .position(mid)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }

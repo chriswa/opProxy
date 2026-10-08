@@ -44,7 +44,7 @@ final class FeedSocket: FeedTransport {
             nextClient += 1
             let state = feed.state()
             clients[client] = fd
-            send(client, FeedMessage.hello(pairedKeys: state.pairedKeys).json)
+            send(client, FeedMessage.hello(pairedKeys: state.pairedKeys, mac: state.mac).json)
             if let status = state.status { send(client, FeedMessage.status(status).json) }
             send(client, ["type": "snapshot", "items": state.items.map(\.item)])
             Thread.detachNewThread { [self] in

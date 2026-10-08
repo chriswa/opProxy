@@ -316,6 +316,8 @@ res=$(phone approve once --unpaired)
 check "unpaired phone: refused" grep -q "This phone isn't paired with opProxy." <<<"$res"
 res=$(phone approve once --tamper-hash)
 check "tampered document hash: refused" grep -q "The phone's copy of this request isn't one opProxy sent." <<<"$res"
+res=$(phone approve once --stale)
+check "old reply: refused" grep -q "That reply is too old" <<<"$res"
 res=$(phone deny); wait $apid
 check "refused replies: request still answerable" grep -q "user denied" "$WORK/asked"
 start_daemon approved 1

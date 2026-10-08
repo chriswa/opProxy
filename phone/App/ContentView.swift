@@ -8,11 +8,11 @@ struct ContentView: View {
         Group {
             if model.paired {
                 queue
-            } else if model.loaded || model.pairedKeys != nil {
-                PairingView().safeAreaInset(edge: .bottom) { StatusBar() }
+            } else if model.loaded {
+                PairingView().safeAreaInset(edge: .bottom) { ErrorBar() }
             } else {
                 // Nothing known yet (a fresh install): wait for iCloud rather than guess.
-                Theme.background.ignoresSafeArea()
+                Theme.background.ignoresSafeArea().overlay(alignment: .bottom) { ErrorBar() }
             }
         }
         .foregroundStyle(Theme.text)
@@ -26,12 +26,12 @@ struct ContentView: View {
     private var queue: some View {
         ZStack {
             // Only claim nothing is pending once iCloud has said so.
-            Group { if model.loaded { empty } else { loading } }.zIndex(-.infinity)
-            if let item = model.current {
-                RequestView(item: item, waiting: model.waiting)
-                    .id(item.id)
+            Group { if model.loaded { EmptyQueue() } else { loading } }.zIndex(-.infinity)
+            if let request = model.current {
+                RequestView(request: request, waiting: model.waiting)
+                    .id(request.id)
                     // Older requests stack above newer ones, so the one leaving stays on top.
-                    .zIndex(-item.createdAt)
+                    .zIndex(-request.item.createdAt)
                     .transition(.asymmetric(insertion: .identity,
                                             removal: .move(edge: .top).combined(with: .opacity)))
             }
@@ -43,19 +43,77 @@ struct ContentView: View {
         VStack(spacing: 0) {
             CautionStripe(tone: Theme.tone(nil)).frame(height: 8).opacity(0.5)
             Spinner(color: Theme.dim).frame(width: 36, height: 36).frame(maxHeight: .infinity)
+            ErrorBar()
         }
         .background(Theme.background)
     }
+}
 
-    private var empty: some View {
+/// Nothing pending: says so, and lists the paired Macs, each with its secret manager's
+/// status and a way to unpair, and offers to pair another.
+private struct EmptyQueue: View {
+    @EnvironmentObject private var model: FeedModel
+    @State private var pairing = false
+
+    var body: some View {
         VStack(spacing: 0) {
             CautionStripe(tone: Theme.tone(nil)).frame(height: 8).opacity(0.5)
             ContentUnavailableView("No pending requests", systemImage: "checkmark.shield",
                                    description: Text("When an agent asks for a secret, it shows up here."))
-            UnpairButton()
-            StatusBar()
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Paired Macs").font(.footnote.weight(.semibold)).foregroundStyle(Theme.dim)
+                ForEach(model.pairedMacs, id: \.zoneID) { MacRow(mac: $0) }
+                Button {
+                    pairing = true
+                } label: {
+                    Label("Pair another Mac", systemImage: "plus").font(.subheadline)
+                }
+                .foregroundStyle(Theme.tone(nil))
+                .padding(.top, 4)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface)
+            .overlay(alignment: .top) { Rectangle().fill(Theme.border).frame(height: 1) }
+            ErrorBar()
         }
         .background(Theme.background)
+        .sheet(isPresented: $pairing) { PairingView(onPaired: { pairing = false }) }
+    }
+}
+
+/// A paired Mac: its name, how long its secret manager's authorization has left, and Unpair.
+private struct MacRow: View {
+    @EnvironmentObject private var model: FeedModel
+    let mac: MacFeed
+    @State private var asking = false
+    @State private var error: String?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "laptopcomputer").foregroundStyle(Theme.dim).frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(mac.displayName).font(.subheadline.weight(.semibold))
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(error ?? Self.status(mac, now: context.date))
+                        .font(.caption)
+                        .foregroundStyle(error == nil ? Theme.dim : Theme.danger)
+                }
+            }
+            Spacer()
+            Button("Unpair") { asking = true }.font(.footnote).foregroundStyle(Theme.dim)
+        }
+        .confirmationDialog("Unpair from \(mac.displayName)?", isPresented: $asking, titleVisibility: .visible) {
+            Button("Unpair", role: .destructive) { Task { error = await model.unpair(mac) } }
+        } message: {
+            Text("Its requests stop coming to this phone until you pair it again.")
+        }
+    }
+
+    private static func status(_ mac: MacFeed, now: Date) -> String {
+        guard let status = mac.status else { return "Paired" }
+        if status.ok, let until = status.untilDate { return "Secret manager authorized · \(Duration.short(until.timeIntervalSince(now))) left" }
+        return status.ok ? "Secret manager authorized" : "Secret manager not authorized on this Mac"
     }
 }
 
@@ -75,55 +133,18 @@ struct FilledButton: ButtonStyle {
     }
 }
 
-/// The 1Password authorization on the Mac, as the feed reports it.
-private struct StatusBar: View {
+/// What went wrong talking to iCloud, if anything.
+private struct ErrorBar: View {
     @EnvironmentObject private var model: FeedModel
 
     var body: some View {
         if let error = model.lastError {
-            label(error, systemImage: "exclamationmark.icloud", color: .orange)
-        } else if let status = model.status {
-            if status.ok, let until = status.untilDate {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    label("Secret manager authorized · \(Duration.short(until.timeIntervalSince(context.date))) left",
-                          systemImage: "key.fill", color: Theme.dim)
-                }
-            } else if !status.ok {
-                label("Secret manager not authorized on the Mac", systemImage: "key.slash", color: Theme.danger)
-            }
-        }
-    }
-
-    private func label(_ text: String, systemImage: String, color: Color) -> some View {
-        Label(text, systemImage: systemImage)
-            .font(.footnote)
-            .foregroundStyle(color)
-            .frame(maxWidth: .infinity)
-            .padding(10)
-            .background(Theme.surface)
-    }
-}
-
-/// Forgets the Mac, so this phone can pair again, with this or another Mac.
-private struct UnpairButton: View {
-    @EnvironmentObject private var model: FeedModel
-    @State private var asking = false
-    @State private var error: String?
-
-    var body: some View {
-        VStack(spacing: 6) {
-            if let error { Text(error).font(.footnote).foregroundStyle(Theme.danger) }
-            Button("Unpair from the Mac") { asking = true }
+            Label(error, systemImage: "exclamationmark.icloud")
                 .font(.footnote)
-                .foregroundStyle(Theme.dim)
-        }
-        .padding(.bottom, 12)
-        .confirmationDialog("Unpair from the Mac?", isPresented: $asking, titleVisibility: .visible) {
-            Button("Unpair", role: .destructive) {
-                Task { error = await model.unpair() }
-            }
-        } message: {
-            Text("Requests stop coming to this phone until you pair it again.")
+                .foregroundStyle(Theme.danger)
+                .frame(maxWidth: .infinity)
+                .padding(10)
+                .background(Theme.surface)
         }
     }
 }

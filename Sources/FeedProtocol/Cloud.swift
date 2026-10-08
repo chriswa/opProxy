@@ -1,13 +1,19 @@
 import CryptoKit
 import Foundation
 
-/// How the approval feed is laid out in CloudKit. Each paired iPhone owns a zone in its
-/// private database and shares it with the Mac's iCloud user alone, so the phone can
-/// subscribe to new requests by itself (a query subscription, which only a zone's owner can
-/// make). Every feed field is an encrypted value, end to end between the user's devices.
+/// How the approval feed is laid out in CloudKit. An iPhone owns one zone in its private
+/// database per Mac it's paired with, shared with that Mac's iCloud user alone, so no Mac sees
+/// another's requests and the phone can subscribe to new requests by itself (a query
+/// subscription, which only a zone's owner can make). Every feed field is an encrypted value,
+/// end to end between the user's devices.
 public enum CloudFeed {
     public static let container = "iCloud.com.chriswa.opproxy"
-    public static let zoneName = "approvalFeed"
+    public static let zonePrefix = "feed-"
+    /// The single zone of phones paired before a phone could serve several Macs.
+    public static let legacyZoneName = "approvalFeed"
+
+    /// The zone for the Mac with this ID (`MacIdentity` on the Mac).
+    public static func zoneName(macID: String) -> String { zonePrefix + macID }
 
     /// Written by the Mac. Record name: the item's ID.
     public enum Item {
@@ -18,11 +24,17 @@ public enum CloudFeed {
         public static let note = "note"
     }
 
-    /// Written by the Mac. Record names: `hello` and `status`.
+    /// Written by the Mac. Record names: `hello` (with the Mac's name), `status`, and
+    /// `presence`, which the Mac refreshes every `presenceInterval` while it has pending
+    /// requests, so a phone can tell a Mac that's asleep from one that's slow.
     public enum State {
         public static let type = "FeedState"
         public static let hello = "hello"
         public static let status = "status"
+        public static let presence = "presence"
+        public static let presenceInterval: TimeInterval = 30
+        /// After this long without presence, a phone treats the Mac's requests as stuck.
+        public static let presenceTimeout: TimeInterval = 90
         /// The APPROVAL_FEED.md message, as a JSON string.
         public static let message = "message"
     }
@@ -57,14 +69,17 @@ public enum CloudFeed {
             Data(SymmetricKey(size: .bits128).withUnsafeBytes { Array($0) })
         }
 
-        /// What the QR code holds: `opproxy-pair:2:<base64url code>:<Mac's user record name>`.
-        public static func qrPayload(code: Data, macUser: String) -> String { "\(scheme):2:\(base64url(code)):\(macUser)" }
+        /// What the QR code holds: `opproxy-pair:3:<base64url code>:<Mac's user record name>:<Mac's ID>`.
+        public static func qrPayload(code: Data, macUser: String, macID: String) -> String {
+            "\(scheme):3:\(base64url(code)):\(macUser):\(macID)"
+        }
 
-        public static func parse(qr payload: String) -> (code: Data, macUser: String)? {
+        public static func parse(qr payload: String) -> (code: Data, macUser: String, macID: String)? {
             let parts = payload.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count == 4, parts[0] == scheme, parts[1] == "2", !parts[3].isEmpty,
+            guard parts.count == 5, parts[0] == scheme, parts[1] == "3", !parts[3].isEmpty,
+                  parts[4].range(of: "^[a-z0-9-]{8,64}$", options: .regularExpression) != nil,
                   let code = unbase64url(parts[2]), code.count == 16 else { return nil }
-            return (code, parts[3])
+            return (code, parts[3], parts[4])
         }
 
         public static func recordName(code: Data) -> String {

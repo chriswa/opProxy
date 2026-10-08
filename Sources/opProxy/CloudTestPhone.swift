@@ -8,7 +8,7 @@ import OpProxyCore
 /// over CloudKit for Tests/cloud-e2e.sh, with a software key kept in OPPROXY_HOME. Its zone
 /// lives in this Mac's own private database, so it exercises the same-Apple-ID path.
 enum CloudTestPhone {
-    static let zoneID = CKRecordZone.ID(zoneName: "approvalFeedTest")
+    static let zoneID = CKRecordZone.ID(zoneName: CloudFeed.zoneName(macID: "test-phone-zone"))
     private static let container = CKContainer(identifier: CloudFeed.container)
     private static var db: CKDatabase { container.privateCloudDatabase }
 
@@ -51,7 +51,7 @@ enum CloudTestPhone {
     }
 
     private static func pair(_ qr: String, key: P256.Signing.PrivateKey) async throws {
-        guard let (code, macUser) = CloudFeed.Rendezvous.parse(qr: qr) else { throw Failure("bad QR payload") }
+        guard let (code, macUser, _) = CloudFeed.Rendezvous.parse(qr: qr) else { throw Failure("bad QR payload") }
         // This stand-in phone shares the Mac's Apple ID, so there is nothing to share: the Mac
         // reads the zone from its own private database.
         guard macUser == (try await container.userRecordID().recordName) else { throw Failure("the QR code names another iCloud user") }

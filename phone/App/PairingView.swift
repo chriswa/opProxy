@@ -3,6 +3,8 @@ import SwiftUI
 
 struct PairingView: View {
     @EnvironmentObject private var model: FeedModel
+    /// Called once paired, when shown as a sheet to pair another Mac.
+    var onPaired: (() -> Void)?
     @State private var scanning = false
     @State private var pasting = false
     @State private var pasted = ""
@@ -87,6 +89,7 @@ struct PairingView: View {
             progress = nil
             error = failure
             busy = false
+            if failure == nil { onPaired?() }
         }
     }
 }

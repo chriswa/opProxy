@@ -5,7 +5,7 @@ import OpProxyCore
 
 /// One change to the feed's state, in the order consumers must apply them (APPROVAL_FEED.md).
 enum FeedMessage {
-    case hello(pairedKeys: [String])
+    case hello(pairedKeys: [String], mac: MacIdentity)
     case status([String: Any])
     case upsert(id: String, item: [String: Any])
     case remove(id: String, note: String)
@@ -13,7 +13,8 @@ enum FeedMessage {
     /// The message as APPROVAL_FEED.md writes it.
     var json: [String: Any] {
         switch self {
-        case .hello(let keys): return ["type": "hello", "protocol": 1, "provider": "opProxy", "pairedKeys": keys]
+        case .hello(let keys, let mac):
+            return ["type": "hello", "protocol": 1, "provider": "opProxy", "pairedKeys": keys, "mac": ["id": mac.id, "name": mac.name]]
         case .status(let status): return ["type": "status", "status": status]
         case .upsert(_, let item): return ["type": "upsert", "item": item]
         case .remove(let id, let note): return ["type": "remove", "id": id, "note": note]
@@ -24,6 +25,7 @@ enum FeedMessage {
 /// Everything a consumer that just connected needs, before any later `FeedMessage`.
 struct FeedState {
     let pairedKeys: [String]
+    let mac: MacIdentity
     let status: [String: Any]?
     /// Pending items, oldest first.
     let items: [(id: String, item: [String: Any])]
@@ -85,7 +87,13 @@ final class ApprovalFeed {
         var documentHashes: Set<String> = []
     }
 
-    init(log: Log, devices: PairedDeviceStore, confirmPairing: @escaping ConfirmPairing) {
+    /// Which Mac this is; re-read on the key-watch timer, so a new name reaches phones.
+    private let identity: () -> MacIdentity
+    private var announcedMac: MacIdentity
+
+    init(log: Log, devices: PairedDeviceStore, identity: @escaping () -> MacIdentity, confirmPairing: @escaping ConfirmPairing) {
+        self.identity = identity
+        announcedMac = identity()
         self.log = log
         self.devices = devices
         self.confirmPairing = confirmPairing
@@ -121,7 +129,7 @@ final class ApprovalFeed {
         dispatchPrecondition(condition: .onQueue(queue))
         announceKeysIfChanged()
         announceStatusIfChanged()
-        return FeedState(pairedKeys: announcedKeys, status: status?.json,
+        return FeedState(pairedKeys: announcedKeys, mac: announcedMac, status: status?.json,
                          items: items.values.sorted { $0.createdAt < $1.createdAt }.map { ($0.id, json($0)) })
     }
 
@@ -227,6 +235,10 @@ final class ApprovalFeed {
         guard let statement = ApprovalStatement.parse(text), statement.v == 1, statement.provider == "opProxy",
               statement.keyId == keyId, statement.id == id
         else { return "That reply was malformed." }
+        // An answer given before the Mac slept, or held up in transit, mustn't act long after.
+        guard abs(Date().timeIntervalSince1970 * 1000 - statement.signedAt) < Self.replyLifetime * 1000 else {
+            return "That reply is too old: answer again."
+        }
         guard let item = items[id] else {
             switch finished[id] {
             case nil: return "That request is no longer pending."
@@ -290,11 +302,15 @@ final class ApprovalFeed {
 
     private func pairedKeys() -> [String] { devices.devices.map(\.keyId) }
 
+    /// How long after a phone signs a reply the Mac still acts on it.
+    static let replyLifetime: TimeInterval = 60
+
     private func announceKeysIfChanged() {
         let keys = pairedKeys()
-        guard keys != announcedKeys else { return }
-        announcedKeys = keys
-        broadcast(.hello(pairedKeys: keys))
+        let mac = identity()
+        guard keys != announcedKeys || mac != announcedMac else { return }
+        (announcedKeys, announcedMac) = (keys, mac)
+        broadcast(.hello(pairedKeys: keys, mac: mac))
     }
 
     // MARK: Status

@@ -94,6 +94,7 @@ private struct SetupView: View {
     @State private var shellOp: String?
     @State private var checked = false
     @State private var error: String?
+    @State private var macName = ""
 
     private var executable: String { URL(fileURLWithPath: Bundle.main.executablePath ?? "").resolvingSymlinksInPath().path }
     private var shellReady: Bool { shellOp == executable }
@@ -126,7 +127,15 @@ private struct SetupView: View {
             }
             if let pairing {
                 step(done: nil, title: "Approve from your iPhone (optional)",
-                     detail: "Install Secret Proxy on your iPhone, then pair it to answer requests there too.") {
+                     detail: "Install Secret Proxy on your iPhone, then pair it to answer requests there too. "
+                        + "A phone paired with several Macs shows each request with its Mac's name.") {
+                    HStack {
+                        Text("This Mac's name")
+                        TextField(Host.current().localizedName ?? "Mac", text: $macName)
+                            .frame(width: 200)
+                            .onSubmit(saveName)
+                        Button("Save", action: saveName)
+                    }
                     Button("Pair an iPhone…") { pairing.start() }
                 }
             }
@@ -141,7 +150,12 @@ private struct SetupView: View {
         .onAppear(perform: check)
     }
 
+    private func saveName() {
+        do { try OpProxyConfig.setMacName(macName, paths) } catch { self.error = "Couldn't save the name: \(error)" }
+    }
+
     private func check() {
+        macName = OpProxyConfig.load(paths)?.macName ?? ""
         realOp = Setup.realOp(paths)
         DispatchQueue.global().async {
             let found = Setup.shellOp()
