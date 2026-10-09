@@ -9,6 +9,13 @@ A drop-in `op` CLI tool that puts one approval dialog in front of 1Password CLI 
 >
 > If exposing that metadata worries you, hold off on opProxy until there's a setting to ask before listings too.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/overview-dark.svg">
+  <img src="docs/overview-light.svg" alt="An agent's op command reaches opProxy's op, first on PATH, and then the opProxy menu bar app. opProxy asks you in its own dialog, and on a paired iPhone over iCloud; allowed reads run through the 1Password CLI in opProxy's session, which 1Password asks you to authorize every 12 hours." width="100%">
+</picture>
+
+opProxy asks 1Password for access once per 12-hour authorization, and from then on answers each agent's secret read with its own dialog, or on your phone.
+
 ## Why
 
 - **1Password's prompt doesn't say who's asking, or for what.** It asks you to unlock the CLI, but not which agent wants it or which item it will read. With several agents running, you can't tell which one is prompting you, and since agents run each command in a new session, the prompts keep coming. opProxy's dialog names the agent and its session, the item and vault, the exact command, and the agent's last message, so you know what you're allowing before you allow it.
@@ -112,6 +119,10 @@ Every request that would show the dialog is also published, over iCloud, to each
 - **Pairing.** Choose **Pair an iPhone…** in the Mac's menu (or run `opProxy pair-iphone`) and scan its QR code in the app. The code is one-time, lasts 10 minutes, and carries the Mac's iCloud account and its ID. The phone invites that account, and no one else, to a zone for that Mac (its share is never open to whoever holds the link), and leaves the invitation in the container's public database, sealed with a key derived from the code under a name derived from it. The Mac accepts, then asks you to confirm the phone: it shows the phone's name and key fingerprint; check the phone shows the same one, click **Pair…**, then touch Touch ID. The paired key is signed with the approval key, so nothing can pair a phone without your Touch ID.
 - **Naming the Mac.** Setup's "This Mac's name" sets what the phone calls it; until then, it's the computer's name. On the phone, tap a Mac's name in the empty queue to give it a nickname there.
 - **Unpairing.** On the phone, the empty queue lists the paired Macs, each with Unpair, which deletes that Mac's zone. On the Mac, `opProxy devices` lists paired phones with their fingerprints, and `opProxy unpair <key-id> | --all` (or the menu's **Paired Phones**) removes one. Unpairing a phone also ends every lasting approval made on it.
+
+### Why the Mac app is signed
+
+The Mac and phone talk through CloudKit, so there's no server to run, and Apple delivers the phone's notifications. CloudKit only works in an app signed with a provisioning profile that grants its iCloud container, so the Mac side is a signed app bundle: Developer ID and notarized for releases, and a development profile from `scripts/provision-mac.sh` for source builds. A build without a profile works, but without a phone. The signature also lets opProxy keep its approval key in a keychain access group only its team's apps can use, and enables the hardened runtime (see [Security measures](#security-measures)).
 
 ### Menu bar
 

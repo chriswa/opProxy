@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 640" width="800" height="640" font-family="-apple-system, BlinkMacSystemFont, &quot;SF Pro Text&quot;, Helvetica, Arial, sans-serif" role="img" aria-label="How opProxy works">
+<defs>
+<pattern id="haz" width="22" height="22" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="22" height="22" fill="#1F1B14"/><rect width="11" height="22" fill="#FACC14"/></pattern>
+<marker id="m-dim" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6B6252"/></marker>
+<marker id="m-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B07D00"/></marker>
+<marker id="m-grn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3D8A2A"/></marker>
+</defs>
+<rect width="800" height="640" rx="16" fill="#FBF7EE"/>
+<clipPath id="top"><rect width="800" height="640" rx="16"/></clipPath>
+<rect width="800" height="12" fill="url(#haz)" clip-path="url(#top)"/>
+<rect x="240" y="40" width="240" height="70" rx="12" fill="#FFFFFF" stroke="#D9CFBB" stroke-width="1.5"/>
+<text x="360" y="70" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="middle">AI agent or terminal</text>
+<text x="360" y="93" font-size="15" font-weight="400" fill="#6B6252" text-anchor="middle">Claude Code, Codex, Cursor</text>
+<path d="M360,110 L360,158" fill="none" stroke="#6B6252" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-dim)"/>
+<text x="374" y="140" font-size="15" font-weight="400" fill="#1F1B14" text-anchor="start" font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">op read …</text>
+<rect x="240" y="160" width="240" height="70" rx="12" fill="#FFFFFF" stroke="#D9CFBB" stroke-width="1.5"/>
+<text x="360" y="189" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="middle"><tspan font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">op</tspan></text>
+<text x="360" y="212" font-size="15" font-weight="400" fill="#6B6252" text-anchor="middle">opProxy’s, ahead of 1Password’s</text>
+<path d="M360,230 L360,278" fill="none" stroke="#6B6252" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-dim)"/>
+<rect x="240" y="280" width="240" height="90" rx="12" fill="#FFF6D6" stroke="#B07D00" stroke-width="2"/>
+<text x="360" y="310" font-size="17" font-weight="600" fill="#8A6100" text-anchor="middle">opProxy</text>
+<text x="360" y="334" font-size="15" font-weight="400" fill="#1F1B14" text-anchor="middle">menu bar app on your Mac</text>
+<text x="360" y="356" font-size="15" font-weight="400" fill="#6B6252" text-anchor="middle">decides each request</text>
+<path d="M360,370 L360,438" fill="none" stroke="#3D8A2A" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-grn)"/>
+<text x="374" y="410" font-size="15" font-weight="400" fill="#3D8A2A" text-anchor="start">allowed</text>
+<rect x="240" y="440" width="240" height="70" rx="12" fill="#FFFFFF" stroke="#D9CFBB" stroke-width="1.5"/>
+<text x="360" y="469" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="middle">1Password CLI</text>
+<text x="360" y="492" font-size="15" font-weight="400" fill="#6B6252" text-anchor="middle">in opProxy’s authorized session</text>
+<path d="M360,510 L360,546" fill="none" stroke="#6B6252" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-dim)"/>
+<path d="M260,556 L260,614 A100,10 0 0 0 460,614 L460,556" fill="#FFFFFF" stroke="#D9CFBB" stroke-width="1.5"/>
+<ellipse cx="360" cy="556" rx="100" ry="10" fill="#F3ECDD" stroke="#D9CFBB" stroke-width="1.5"/>
+<text x="360" y="596" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="middle">1Password</text>
+<path d="M260,590 L222,590 Q210,590 210,578 L210,337 Q210,325 222,325 L238,325" fill="none" stroke="#B07D00" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-acc)"/>
+<text x="196" y="420" font-size="16" font-weight="600" fill="#8A6100" text-anchor="end">Every 12 hours</text>
+<text x="196" y="444" font-size="15" font-weight="400" fill="#6B6252" text-anchor="end">1Password asks you</text>
+<text x="196" y="466" font-size="15" font-weight="400" fill="#6B6252" text-anchor="end">to authorize</text>
+<text x="196" y="488" font-size="15" font-weight="400" fill="#6B6252" text-anchor="end">opProxy’s session</text>
+<path d="M482,310 L538,310" fill="none" stroke="#B07D00" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#m-acc)" marker-end="url(#m-acc)"/>
+<rect x="540" y="262" width="236" height="96" rx="12" fill="#FFFFFF" stroke="#D9CFBB" stroke-width="1.5"/>
+<text x="556" y="292" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="start">opProxy’s dialog</text>
+<text x="556" y="316" font-size="15" font-weight="400" fill="#6B6252" text-anchor="start">every secret read: item,</text>
+<text x="556" y="338" font-size="15" font-weight="400" fill="#6B6252" text-anchor="start">agent, command, Touch ID</text>
+<path d="M482,350 L508,350 Q520,350 520,362 L520,416 Q520,428 532,428 L558,428" fill="none" stroke="#6B6252" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 5" marker-start="url(#m-dim)" marker-end="url(#m-dim)"/>
+<rect x="560" y="400" width="216" height="60" rx="12" fill="#FBF7EE" stroke="#D9CFBB" stroke-width="1.5" stroke-dasharray="5 5"/>
+<text x="576" y="425" font-size="16" font-weight="600" fill="#1F1B14" text-anchor="start">iPhone app</text>
+<text x="576" y="447" font-size="14.5" font-weight="400" fill="#6B6252" text-anchor="start">same question, via iCloud</text>
+</svg>
