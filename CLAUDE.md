@@ -43,7 +43,7 @@ xcrun devicectl device install app --device <id from `xcrun devicectl list devic
     phone/build/Build/Products/Debug-iphoneos/opProxy.app
 ```
 
-The phone must be unlocked and reachable (same Wi-Fi, or a cable) for `devicectl`; a locked phone shows as unavailable. The simulator has no iCloud account, so it can't pair. For screenshots (the README's are in `docs/screenshots`), debug builds open a fixed screen with sample data when launched with `-shot pairing|guide|confirm|request|allowed|macs`, e.g. `xcrun simctl launch --terminate-running-process "iPhone 17 Pro" com.chriswa.opproxy.phone -shot request`, after `xcrun simctl status_bar "iPhone 17 Pro" override --time 9:41`.
+The phone must be unlocked and reachable (same Wi-Fi, or a cable) for `devicectl`; a locked phone shows as unavailable. The simulator has no iCloud account, so it can't pair. For screenshots (the README's are in `docs/screenshots`), debug builds open a fixed screen with sample data when launched with `-shot pairing|guide|confirm|request|allowed|macs|demo|demo-request`, e.g. `xcrun simctl launch --terminate-running-process "iPhone 17 Pro" com.chriswa.opproxy.phone -shot request`, after `xcrun simctl status_bar "iPhone 17 Pro" override --time 9:41`.
 
 `phone/try.sh start | pair | request [session] | stop` runs a test daemon beside the installed one (state in `~/.opProxy-try`, its own key icon, a stub `op`) for trying the phone with fake requests. Debug builds honour `OPPROXY_*` test knobs; release builds ignore them, so a release binary's CLI always reads the real `~/.opProxy`.
 

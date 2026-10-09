@@ -4,7 +4,7 @@ import Foundation
 /// Screens to open for README and App Store screenshots in the simulator, which has no iCloud
 /// account: launch with `-shot <name>`. Debug builds only.
 enum Screenshot: String {
-    case pairing, guide, confirm, request, allowed, macs
+    case pairing, guide, confirm, request, allowed, macs, demo, demoRequest = "demo-request"
 
     static var current: Screenshot? {
         let arguments = ProcessInfo.processInfo.arguments

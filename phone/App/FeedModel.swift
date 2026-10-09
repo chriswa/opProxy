@@ -123,6 +123,11 @@ final class FeedModel: ObservableObject {
             let home = Demo.mac(zone: CKRecordZone.ID(zoneName: CloudFeed.zoneName(macID: "home")), name: "Home iMac")
             let work = Demo.mac(name: "Work MacBook")
             macs = [work.zoneID.zoneName: work, home.zoneID.zoneName: home]
+        case .demo:
+            startDemo()
+        case .demoRequest:
+            startDemo()
+            addDemoRequest()
         }
     }
     #endif
