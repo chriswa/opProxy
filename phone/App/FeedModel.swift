@@ -190,8 +190,8 @@ final class FeedModel: ObservableObject {
 
     // MARK: Polling
 
-    /// Polls every 2 seconds while the app is in the foreground: CloudKit only pushes new
-    /// requests, not their removal or status changes. The model owns the loop, so nothing a
+    /// Polls every 2 seconds while the app is in the foreground: CloudKit doesn't push status
+    /// changes, and iOS may hold back or drop its silent pushes for answered requests. The model owns the loop, so nothing a
     /// view does can cancel a request in flight.
     func setActive(_ active: Bool) {
         guard active != (poller != nil) else { return }
@@ -260,6 +260,7 @@ final class FeedModel: ObservableObject {
         #endif
         guard !refreshing else { return }
         refreshing = true
+        let started = Date()
         defer {
             refreshing = false
             update(\.now, Date())
@@ -291,6 +292,7 @@ final class FeedModel: ObservableObject {
             // Only a fetch that worked says which Macs there are.
             update(\.loaded, true)
             update(\.rememberedMacs, Dictionary(uniqueKeysWithValues: pairedMacs.map { ($0.zoneID.zoneName, $0.displayName) }))
+            await clearNotifications(fetchedAt: started)
         } catch let error as CKError where error.code == .changeTokenExpired {
             (databaseToken, zoneTokens) = (nil, [:])
         } catch {
@@ -324,8 +326,6 @@ final class FeedModel: ObservableObject {
         case CloudFeed.Item.type:
             guard let json = record.encryptedValues[CloudFeed.Item.item] as? String, let item = FeedItem.parse(json) else { return }
             let answered = record.encryptedValues[CloudFeed.Item.note] != nil
-            // Answered or timed out: its notification goes too.
-            if answered { clearNotification(item.id) }
             updateMac(zone) { mac in
                 mac.items.removeAll { $0.id == item.id }
                 if !answered {
@@ -358,28 +358,42 @@ final class FeedModel: ObservableObject {
         }
     }
 
-    private func clearNotification(_ id: String) {
-        let center = UNUserNotificationCenter.current()
-        center.getDeliveredNotifications { notes in
-            let ids = notes.filter { $0.request.content.userInfo["itemId"] as? String == id }.map(\.request.identifier)
-            center.removeDeliveredNotifications(withIdentifiers: ids)
+    /// Takes down the notifications of requests that aren't in the queue: answered, timed out,
+    /// dismissed, or from a Mac no longer paired. Only after a fetch that worked, so the queue
+    /// is complete. A notification delivered just before the fetch began may be for a request
+    /// the fetch didn't see yet; the next fetch decides about it.
+    private func clearNotifications(fetchedAt: Date) async {
+        // In the background nothing keeps `now` current, and the queue leaves out expired requests.
+        update(\.now, Date())
+        let pending = Set(queue.map(\.id))
+        await RequestNotifications.remove { record, note in
+            note.date < fetchedAt - 10 && !pending.contains(record.zoneID.zoneName + "/" + record.recordName)
         }
     }
 
-    /// The zone's new-request subscription: a push for each request the Mac writes.
+    /// The zone's subscriptions: a push for each request the Mac writes, which the
+    /// notification extension fills in, and a silent one when the Mac answers or deletes a
+    /// request, which wakes the app to take down its notification.
     private func subscribe(_ zone: CKRecordZone.ID) async {
-        let subscription = CKQuerySubscription(recordType: CloudFeed.Item.type, predicate: NSPredicate(value: true),
-                                               subscriptionID: "new-requests-\(zone.zoneName)", options: [.firesOnRecordCreation])
-        subscription.zoneID = zone
+        let created = CKQuerySubscription(recordType: CloudFeed.Item.type, predicate: NSPredicate(value: true),
+                                          subscriptionID: "new-requests-\(zone.zoneName)", options: [.firesOnRecordCreation])
+        created.zoneID = zone
         let info = CKSubscription.NotificationInfo()
         info.title = "opProxy"
         info.alertBody = "An agent is asking for a secret."
         info.soundName = "default"
         info.shouldSendMutableContent = true
         info.category = "request"
-        subscription.notificationInfo = info
+        created.notificationInfo = info
+        let changed = CKQuerySubscription(recordType: CloudFeed.Item.type, predicate: NSPredicate(value: true),
+                                          subscriptionID: "changed-requests-\(zone.zoneName)",
+                                          options: [.firesOnRecordUpdate, .firesOnRecordDeletion])
+        changed.zoneID = zone
+        let silent = CKSubscription.NotificationInfo()
+        silent.shouldSendContentAvailable = true
+        changed.notificationInfo = silent
         do {
-            _ = try await db.modifySubscriptions(saving: [subscription], deleting: [])
+            _ = try await db.modifySubscriptions(saving: [created, changed], deleting: [])
             subscribed.insert(zone.zoneName)
         } catch {
             report(error, in: "subscribe")

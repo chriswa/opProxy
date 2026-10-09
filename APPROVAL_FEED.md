@@ -21,7 +21,7 @@ Container `iCloud.com.chriswa.opproxy`, Production environment, schema `phone/sc
 | `FeedInbox` | random | phone | `message`: a reply or pair message; `response`: the Mac's answer to it |
 | `PairingRendezvous` | from the pairing code | phone, public database | `sealed`: the invitation, sealed with the code |
 
-The Mac removes an answered or timed-out item by setting its `note`, and deletes it 10 minutes later. The phone subscribes to new `FeedItem` records in each zone, which is why it owns the zones: only a zone's owner can make that subscription. A phone treats a Mac whose `presence` is more than 90 seconds old, with requests pending, as asleep or offline.
+The Mac removes an answered or timed-out item by setting its `note`, and deletes it 10 minutes later. The phone subscribes to new `FeedItem` records in each zone, and silently to their updates and deletions so it can take down notifications for requests that are over. That is why it owns the zones: only a zone's owner can make those subscriptions. A phone treats a Mac whose `presence` is more than 90 seconds old, with requests pending, as asleep or offline.
 
 ## Pairing
 

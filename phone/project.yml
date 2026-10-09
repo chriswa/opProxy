@@ -20,7 +20,7 @@ targets:
   OpProxyPhone:
     type: application
     platform: iOS
-    sources: [App]
+    sources: [App, Shared]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chriswa.opproxy.phone
@@ -49,7 +49,7 @@ targets:
   OpProxyPhoneNotifications:
     type: app-extension
     platform: iOS
-    sources: [NotificationService]
+    sources: [NotificationService, Shared]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.chriswa.opproxy.phone.notifications

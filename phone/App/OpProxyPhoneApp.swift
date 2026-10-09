@@ -4,26 +4,26 @@ import UserNotifications
 @main
 struct OpProxyPhoneApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
-    @StateObject private var model = FeedModel()
     @Environment(\.scenePhase) private var phase
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(model)
+                .environmentObject(delegate.model)
                 .onAppear {
-                    delegate.model = model
                     #if DEBUG
-                    if let shot = Screenshot.current { model.prepare(shot) }
+                    if let shot = Screenshot.current { delegate.model.prepare(shot) }
                     #endif
                 }
-                .onChange(of: phase, initial: true) { _, phase in model.setActive(phase == .active) }
+                .onChange(of: phase, initial: true) { _, phase in delegate.model.setActive(phase == .active) }
         }
     }
 }
 
+/// Owns the model, since a silent push can launch the app in the background without its UI.
+@MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
-    weak var model: FeedModel?
+    let model = FeedModel()
 
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
@@ -43,12 +43,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     /// With the app open, the request is already on screen: fetch it, and show nothing.
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async
         -> UNNotificationPresentationOptions {
-        await model?.refresh()
+        await model.refresh()
         return []
+    }
+
+    /// A silent push: the Mac answered or deleted a request. Fetching takes down its notification.
+    func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any]) async
+        -> UIBackgroundFetchResult {
+        await model.refresh()
+        return .newData
     }
 
     /// Requests are answered oldest first, so a tapped notification just opens the queue.
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        await model?.refresh()
+        await model.refresh()
     }
 }
