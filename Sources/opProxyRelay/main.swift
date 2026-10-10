@@ -25,7 +25,7 @@ if arguments.dropFirst().first == "test-phone" {
 
 if arguments.count > 1 {
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-    print("opProxy iCloud Relay \(version): started by the opProxy daemon, not by hand.")
+    print("opProxy iCloud Relay \(version), relay protocol \(RelayProtocol.version): started by the opProxy daemon, not by hand.")
     exit(arguments[1] == "--version" ? 0 : 2)
 }
 

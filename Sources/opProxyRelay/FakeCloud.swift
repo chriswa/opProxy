@@ -43,7 +43,11 @@ final class FakeCloud {
         }
     }
 
-    func start() { emit(.ready(version: "fake")) }
+    /// `OPPROXY_TEST_RELAY_PROTOCOL` plays a relay that speaks another protocol.
+    func start() {
+        let version = ProcessInfo.processInfo.environment["OPPROXY_TEST_RELAY_PROTOCOL"].flatMap(Int.init) ?? RelayProtocol.version
+        emit(.ready(version: "fake", protocolVersion: version))
+    }
 
     func handle(_ command: RelayCommand) {
         append("commands", String(decoding: RelayLine.encode(command), as: UTF8.self))

@@ -118,6 +118,12 @@ check "unpair deletes the pairing key" wait_for '[ -z "$(ls "$WORK/items")" ]'
 check "unpair unlinks the zone" wait_for 'grep -q "\"unlink\"" "$CLOUD/commands"'
 check "the relay stops when no phone is left" wait_for 'grep -q "stopping the relay" "$LOG"'
 
+# --- a relay that speaks another protocol is turned away, and pairing says why
+stop_daemon
+start_daemon OPPROXY_TEST_RELAY_PROTOCOL=99 OPPROXY_TEST_CLOUD_PAIR="$CLOUD/qr2"
+check "a relay on another protocol is refused" wait_for 'grep -q "speaks relay protocol 99" "$LOG"'
+check "pairing fails with the reason" wait_for 'grep -q "phone pairing: .*Update this opProxy" "$LOG"'
+
 [ $FAIL -gt 0 ] && { echo "--- daemon log"; tail -30 "$LOG"; }
 echo; echo "$PASS passed, $FAIL failed"
 [ $FAIL -eq 0 ]

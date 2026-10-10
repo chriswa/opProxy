@@ -42,7 +42,7 @@ final class Relay {
 
     func start() {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-        emit(.ready(version: version))
+        emit(.ready(version: version, protocolVersion: RelayProtocol.version))
         Task.detached { [self] in await run() }
     }
 

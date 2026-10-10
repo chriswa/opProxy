@@ -1,5 +1,13 @@
 import Foundation
 
+/// The version of the commands and events below, separate from the app version: a self-built
+/// opProxy can run with a released relay, so they check this instead. Raise it only for a
+/// change the other side would misread (a renamed or reshaped case, or one it can't do
+/// without); adding a case one side may ignore needs no change.
+public enum RelayProtocol {
+    public static let version = 1
+}
+
 /// What the opProxy daemon and opProxy iCloud Relay say to each other. The daemon starts the
 /// relay as its child, only while it has an iPhone to talk to, and they exchange one JSON
 /// value per line on the relay's stdin and stdout. The relay is the only part signed for
@@ -31,8 +39,9 @@ public enum RelayCommand: Codable, Equatable {
 }
 
 public enum RelayEvent: Codable, Equatable {
-    /// Sent once at start; the daemon then sends every link and record afresh.
-    case ready(version: String)
+    /// Sent once at start, with the relay's app version and `RelayProtocol.version`; the
+    /// daemon then sends every link and record afresh, if it speaks the same protocol.
+    case ready(version: String, protocolVersion: Int)
     /// This Mac's iCloud user, as the phone needs it to share a zone, or why there isn't one.
     case account(user: String?, error: String?)
     /// A phone's inbox record that hasn't been answered.

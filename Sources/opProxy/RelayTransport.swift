@@ -300,8 +300,21 @@ final class RelayTransport: FeedTransport {
 
     private func handle(_ event: RelayEvent) {
         switch event {
-        case .ready(let version):
-            log.write("relay feed: relay \(version) ready")
+        case .ready(let version, let protocolVersion):
+            guard protocolVersion == RelayProtocol.version else {
+                // Not retried until opProxy restarts or pairing starts again: a different relay
+                // has to be installed first.
+                let older = protocolVersion < RelayProtocol.version ? "\(Self.appName)" : "this opProxy"
+                let message = "\(Self.appName) \(version) speaks relay protocol \(protocolVersion), and this opProxy "
+                    + "speaks \(RelayProtocol.version), so phones can't be reached. Update \(older)."
+                log.write("relay feed: \(message)")
+                try? relay?.input.close()
+                relay = nil
+                relayExitedAt = .distantFuture
+                pairing?.finish(ok: false, message, self)
+                return
+            }
+            log.write("relay feed: relay \(version) ready (protocol \(protocolVersion))")
             paced = nil
             pace()
             for link in links { serve(link) }
