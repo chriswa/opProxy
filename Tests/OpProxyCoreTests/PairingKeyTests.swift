@@ -55,7 +55,6 @@ final class PairingKeyTests: XCTestCase {
         XCTAssertEqual(pairing.id, again.id)
         XCTAssertEqual(pairing.id.count, 32)
         XCTAssertNotEqual(pairing.id, PairingKey(secret: Data("other".utf8)).id)
-        XCTAssertNotEqual(pairing.commitment, PairingKey(secret: Data("other".utf8)).commitment)
     }
 
     // MARK: Handshake
@@ -136,29 +135,20 @@ final class PairingKeyTests: XCTestCase {
         let op = FakeOp()
         let vault = PairingKeyVault(run: op.run)
         op.reply = ProxyResponse(exitCode: 0, stdout: item(), stderr: Data())
-        let key = try vault.load(itemId: "abc123", commitment: nil)
+        let key = try vault.load(itemId: "abc123")
         XCTAssertEqual(key.id, PairingKey(secret: Data(Self.generated.utf8)).id)
         XCTAssertEqual(op.calls.last, ["item", "get", "abc123", "--format", "json", "--reveal"])
 
         for wrong in [item(title: "GitHub token"), item(tags: []), item(category: "LOGIN"), item(password: "short")] {
             op.reply = ProxyResponse(exitCode: 0, stdout: wrong, stderr: Data())
-            XCTAssertThrowsError(try vault.load(itemId: "abc123", commitment: nil))
+            XCTAssertThrowsError(try vault.load(itemId: "abc123"))
         }
-    }
-
-    func testLoadChecksTheCommitment() throws {
-        let op = FakeOp()
-        op.reply = ProxyResponse(exitCode: 0, stdout: item(), stderr: Data())
-        let vault = PairingKeyVault(run: op.run)
-        let right = PairingKey(secret: Data(Self.generated.utf8)).commitment
-        XCTAssertNoThrow(try vault.load(itemId: "abc123", commitment: right))
-        XCTAssertThrowsError(try vault.load(itemId: "abc123", commitment: PairingKey(secret: Data("x".utf8)).commitment))
     }
 
     func testLoadReportsOpsError() {
         let op = FakeOp()
         op.reply = ProxyResponse(exitCode: 1, stdout: Data(), stderr: Data("[ERROR] not signed in".utf8))
-        XCTAssertThrowsError(try PairingKeyVault(run: op.run).load(itemId: "abc123", commitment: nil)) {
+        XCTAssertThrowsError(try PairingKeyVault(run: op.run).load(itemId: "abc123")) {
             XCTAssertEqual(($0 as? PairingKeyVault.Failure)?.description, "could not read the pairing key: [ERROR] not signed in")
         }
     }

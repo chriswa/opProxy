@@ -37,18 +37,14 @@ public struct PairingKeyVault {
     }
 
     /// Reads a pairing's secret back. Only an item this vault made counts: one with the
-    /// pairing title and tag. With `commitment` (from the Touch ID-signed pairing entry), the
-    /// key must also be the one paired, so a swapped item ID can't feed in a known secret.
-    public func load(itemId: String, commitment: String?) throws -> PairingKey {
+    /// pairing title and tag. Nothing checks it's the very key paired: planting another would
+    /// take writing to 1Password, which already reveals more than this key protects.
+    public func load(itemId: String) throws -> PairingKey {
         let item = try parse(run(["item", "get", itemId, "--format", "json", "--reveal"]), doing: "read the pairing key")
         guard Self.isPairingKey(title: item.title), item.tags?.contains(Self.tag) == true, item.category == "PASSWORD" else {
             throw Failure(description: "1Password item \(itemId) isn't an opProxy pairing key")
         }
-        let key = PairingKey(secret: try secret(of: item))
-        if let commitment, key.commitment != commitment {
-            throw Failure(description: "1Password item \(itemId) doesn't hold the key this phone was paired with")
-        }
-        return key
+        return PairingKey(secret: try secret(of: item))
     }
 
     /// Deletes a pairing's item, for unpairing. An item that's already gone counts as deleted.

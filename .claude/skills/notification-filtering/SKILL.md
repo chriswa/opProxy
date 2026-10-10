@@ -16,7 +16,7 @@ The phone takes down a request's notification once the request is answered, deni
 
 Apple's notification filtering entitlement, `com.apple.developer.usernotifications.filtering`, lets a notification service extension hide a push by passing an empty `UNNotificationContent()` to its content handler. With it:
 
-1. In `NotificationService`, when the request's record already has a `note`, or is gone, or has expired, deliver empty content instead of the request.
+1. In `NotificationService`, when the request's record already has a `note` (sealed in `pair-` zones: open it with `PairingSecrets.macField`, as the extension already does for `item`), or is gone, or has expired, deliver empty content instead of the request.
 2. Optionally make `changed-requests-<zone>` a visible, mutable-content push the extension always hides after taking down the request's notification. Visible pushes aren't throttled like silent ones and reach a force-quit app.
 
 The entitlement has to be requested from Apple with a form (search for "notification service extension filtering entitlement request"); it isn't self-serve. Approval isn't guaranteed. Ask the developer whether it's been granted before writing code that needs it.
@@ -24,8 +24,8 @@ The entitlement has to be requested from Apple with a form (search for "notifica
 ## Footguns
 
 - The entitlement goes on the extension, `com.chriswa.opproxy.phone.notifications`, not the app. Add it to that target's `entitlements` in `phone/project.yml`; a build signed with a profile that lacks it fails to provision.
-- Without the entitlement, empty content doesn't hide anything: iOS shows the push's original alert. Same if the extension crashes, runs out of time or memory, or can't reach iCloud. Every push the extension handles needs alert text that's acceptable to show on its own, because sometimes it will be.
+- Without the entitlement, empty content doesn't hide anything: iOS shows the push's original alert. Same if the extension crashes, runs out of time or memory, can't reach iCloud, or can't read the zone's pairing key from the shared keychain group. Every push the extension handles needs alert text that's acceptable to show on its own, because sometimes it will be.
 - iOS only runs the extension for a push with an alert, so a visible `changed-requests` push must keep `title`/`alertBody` and `shouldSendMutableContent`. Don't also leave `shouldSendContentAvailable` on, or the app wakes for the same change as well.
 - `serviceExtensionTimeWillExpire` delivers whatever content is ready. For a push meant to be hidden, start from empty content so a timeout hides it rather than showing the fallback text.
 - Subscriptions are saved by ID on every launch, so changing one's options keeps its ID and replaces it; a renamed ID leaves the old subscription on existing phones until it's deleted with `modifySubscriptions(saving:deleting:)`.
-- The Mac deletes and rewrites records "written under an earlier membership" (`CloudTransport`). That fires the creation subscription again, so filtering on "record already has a `note`" also covers a rewritten answered request; don't filter on record age instead.
+- The Mac deletes and rewrites records "written under an earlier membership" (opProxy iCloud Relay, `Sources/opProxyRelay/Relay.swift`). That fires the creation subscription again, so filtering on "record already has a `note`" also covers a rewritten answered request; don't filter on record age instead.

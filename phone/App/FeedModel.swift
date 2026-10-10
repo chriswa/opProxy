@@ -16,6 +16,8 @@ struct MacFeed: Equatable {
     var nickname: String?
     /// The opProxy version it runs, from its `hello`; nil from versions that didn't say.
     var version: String?
+    /// The feed protocol it speaks, from its `hello`.
+    var feedProtocol: Int?
     /// The Mac's paired keys, from its `hello`; nil until the Mac has joined the zone.
     var pairedKeys: [String]?
     var status: FeedProviderStatus?
@@ -27,8 +29,9 @@ struct MacFeed: Equatable {
 
     var paired: Bool { pairedKeys?.contains(PhoneKey.keyId) == true }
     var displayName: String { nickname ?? name ?? "Mac" }
-    /// Whether it runs a different version from this app: the two are released together.
-    var mismatched: Bool { version != FeedModel.appVersion }
+    /// Whether it speaks a different feed protocol from this app. App versions may differ: a
+    /// Mac can run its own build.
+    var mismatched: Bool { feedProtocol.map { $0 != FeedProtocolVersion.current } ?? false }
 
     /// Whether the Mac has gone quiet with requests pending (asleep, or offline). A new
     /// request counts as hearing from it.
@@ -352,6 +355,7 @@ final class FeedModel: ObservableObject {
                     mac.name = (message["mac"] as? [String: Any])?["name"] as? String
                     mac.macID = (message["mac"] as? [String: Any])?["id"] as? String
                     mac.version = (message["mac"] as? [String: Any])?["version"] as? String
+                    mac.feedProtocol = message["protocol"] as? Int
                 case CloudFeed.State.presence:
                     mac.presenceAt = (message["aliveAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
                 case CloudFeed.State.status:

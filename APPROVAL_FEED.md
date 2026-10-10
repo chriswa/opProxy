@@ -10,18 +10,18 @@ How opProxy on a Mac publishes the requests it would ask about to paired iPhones
 
 ## CloudKit layout
 
-Container `iCloud.com.chriswa.opproxy`, Production environment, schema `phone/schema.ckdb`. For each Mac it's paired with, the phone owns a zone in its private database (`pair-<from the pairing code>` for a sealed pairing, `feed-<mac id>` for one from before), shared with that Mac's iCloud account alone (invited by user record, never open to whoever holds the link). When the phone and Mac share an Apple ID, there's no share: the Mac reads the zone from its own private database. Every field below is an encrypted value.
+Container `iCloud.com.chriswa.opproxy`, Production environment, schema `phone/schema.ckdb`. For each Mac it's paired with, the phone owns a zone in its private database (`pair-<from the pairing code>`; a phone also keeps `feed-<mac id>` zones for Macs still on a version before 0.3.0, which aren't sealed), shared with that Mac's iCloud account alone (invited by user record, never open to whoever holds the link). When the phone and Mac share an Apple ID, there's no share: the Mac reads the zone from its own private database. Every field below is an encrypted value.
 
 | Record type | Name | Written by | Holds |
 |---|---|---|---|
 | `FeedItem` | the item's ID | Mac | `item`: an Item (below) as JSON; `note`, once it's no longer pending ("Allowed on the Mac", "Timed out") |
-| `FeedState` | `hello` | Mac | `{"type":"hello","protocol":1,"provider":"opProxy","pairedKeys":[…],"mac":{"id","name"}}` |
+| `FeedState` | `hello` | Mac | `{"type":"hello","protocol":1,"provider":"opProxy","pairedKeys":[…],"mac":{"id","name","version"}}`. `protocol` is `FeedProtocolVersion`, raised only for changes a phone would misread; the phone warns when it differs. |
 | `FeedState` | `status` | Mac | `{"type":"status","status":Status}` |
 | `FeedState` | `presence` | Mac | `{"type":"presence","aliveAt":ms}`, every 30 seconds while requests are pending |
 | `FeedInbox` | random | phone | `message`: a reply or pair message; `response`: the Mac's answer to it |
 | `PairingRendezvous` | from the pairing code | phone, public database | `sealed`: the invitation, sealed with the code |
 
-In a sealed zone each field holds the base64 of a sealed copy of the value above (`SealedField`): ChaCha20-Poly1305 under the pairing key, authenticating the record type, field, record name and which side wrote it, with the time it was sealed inside. The exceptions come before the key exists: the `pair` message and its `pair-result`, and an empty `hello` the Mac writes to show it joined.
+In a sealed zone each field holds the base64 of a sealed copy of the value above (`SealedField`): ChaCha20-Poly1305 under a key derived from the pairing secret (HKDF-SHA256), authenticating the record type, field, record name and which side wrote it, with the time it was sealed inside. The exceptions come before the key exists: the `pair` message and its `pair-result`, and an empty `hello` the Mac writes to show it joined.
 
 The Mac removes an answered or timed-out item by setting its `note`, and deletes it 10 minutes later. The phone subscribes to new `FeedItem` records in each zone, and silently to their updates and deletions so it can take down notifications for requests that are over. That is why it owns the zones: only a zone's owner can make those subscriptions. A phone treats a Mac whose `presence` is more than 90 seconds old, with requests pending, as asleep or offline.
 

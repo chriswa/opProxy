@@ -184,14 +184,13 @@ private struct ErrorBar: View {
     }
 }
 
-/// A Mac running a different version from this app. The two are released together, so one
-/// of them needs updating.
+/// A Mac speaking a different feed protocol from this app, so one of them needs updating.
 private struct VersionWarning: View {
     let mac: MacFeed
 
     var body: some View {
         Label {
-            Text("\(mac.displayName) runs opProxy \(mac.version ?? "older than 0.2.2"), and this phone runs "
+            Text("\(mac.displayName) runs opProxy \(mac.version ?? "older than 0.2.2"), which doesn't work with this phone's "
                  + "\(FeedModel.appVersion). Update whichever is behind.")
                 .fixedSize(horizontal: false, vertical: true)
         } icon: {

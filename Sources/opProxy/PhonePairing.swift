@@ -46,6 +46,20 @@ final class PhonePairing {
         }
     }
 
+    /// After updating from a version before 0.3.0, whose pairings had no pairing key: those
+    /// phones get nothing until they pair again.
+    func askToPairAgain() {
+        let alert = NSAlert()
+        alert.messageText = "Pair your iPhone again"
+        alert.informativeText = "This version of opProxy seals everything it sends your iPhone with a key the two "
+            + "make when they pair. Phones paired with an earlier version don't have one, so they won't get requests "
+            + "until they pair once more."
+        alert.addButton(withTitle: "Pair Now")
+        alert.addButton(withTitle: "Later")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { start() }
+    }
+
     private static func alert(_ message: String) {
         let alert = NSAlert()
         alert.messageText = "Couldn't pair an iPhone"

@@ -172,7 +172,7 @@ final class RelayTransport: FeedTransport {
             guard let item = link.keyItem, Date().timeIntervalSince(loading[link.zone] ?? .distantPast) > 30 else { continue }
             loading[link.zone] = Date()
             DispatchQueue.global().async { [self] in
-                let result = Result { try vault.load(itemId: item, commitment: nil) }
+                let result = Result { try vault.load(itemId: item) }
                 queue.async { [self] in
                     switch result {
                     case .success(let key):

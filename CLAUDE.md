@@ -4,7 +4,7 @@ opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in
 
 ## Layout
 
-- `Sources/FeedProtocol`: shared by the Mac and the phone. Wire types, the CloudKit layout (`CloudFeed`), documents, signed statements, `Duration`.
+- `Sources/FeedProtocol`: shared by the Mac and the phone. Wire types, the CloudKit layout (`CloudFeed`), the pairing key and sealing (`PairingKey.swift`), the relay's commands and the protocol numbers (`Relay.swift`), documents, signed statements, `Duration`.
 - `Sources/OpProxyCore`: the Mac's logic that doesn't need AppKit. `Sources/opProxy`: the Mac app (daemon, dialog, menu, Setup, `RelayTransport`, `PhonePairing`).
 - `Sources/opProxyRelay`: opProxy iCloud Relay, the only part that uses CloudKit. The daemon runs it as a child process while an iPhone is paired or pairing, and seals everything it hands it with the pairing's key.
 - `phone/project.yml`: the iPhone app, its notification extension, and `MacSigning`, a stub Mac app built only so Xcode makes the Mac's provisioning profiles. Generate the Xcode project with `xcodegen generate` in `phone/`; `OpProxyPhone.xcodeproj` is generated and ignored.
@@ -16,7 +16,7 @@ opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in
 | What | Value |
 |---|---|
 | Team | 7H2524M5TN |
-| Mac app | `com.chriswa.opproxy` |
+| Mac app, and opProxy iCloud Relay | `com.chriswa.opproxy` (one bundle ID and profile for both) |
 | iPhone app / notification extension | `com.chriswa.opproxy.phone` / `.phone.notifications` |
 | CloudKit container | `iCloud.com.chriswa.opproxy`, Production environment for every build (an entitlement in `project.yml`) |
 | App Store Connect app | opProxy (iPhone), ID 6820385028, SKU `secretproxy` |
@@ -49,14 +49,14 @@ The phone must be unlocked and reachable (same Wi-Fi, or a cable) for `devicectl
 
 `phone/try.sh start | pair | request [session] | stop` runs a test daemon beside the installed one (state in `~/.opProxy-try`, its own key icon, a stub `op`) for trying the phone with fake requests. Debug builds honour `OPPROXY_*` test knobs; release builds ignore them, so a release binary's CLI always reads the real `~/.opProxy`.
 
-Installing locally (`./install.sh`, after `scripts/provision-mac.sh` once a year) restarts the daemon, so 1Password asks to authorize again.
+Installing locally (`./install.sh`, after `scripts/provision-mac.sh` once a year) restarts the daemon, so 1Password asks to authorize again; paired phones get nothing until it has, since their pairing keys are read from 1Password.
 
 ## Versions and releases
 
-Both apps share one version, in `VERSION`. `scripts/bump-version.sh 0.3.0` sets it there and as the iPhone app's `MARKETING_VERSION` in `phone/project.yml`; the release scripts refuse to run if they differ. The phone warns when a paired Mac runs a different version, so release both together.
+Both apps share one version, in `VERSION`. `scripts/bump-version.sh 0.3.0` sets it there and as the iPhone app's `MARKETING_VERSION` in `phone/project.yml`; the release scripts refuse to run if they differ. Compatibility doesn't hang on it: the phone warns only when a Mac's feed protocol (`FeedProtocolVersion`) differs, and opProxy refuses a relay on another relay protocol (`RelayProtocol`), so a Mac can run its own build. Raise those numbers only for changes the other side would misread.
 
 1. `scripts/bump-version.sh <version>` and commit.
-2. **Mac:** `scripts/release.sh --publish`. It builds from a fresh export of `HEAD` (uncommitted changes aren't included, and no per-Mac key pin gets in), fetches a Developer ID provisioning profile by exporting the `MacSigning` stub, signs with Developer ID, notarizes, staples, and creates GitHub release `v<version>`. Push `main` first, so the tag points at the right commit.
+2. **Mac:** `scripts/release.sh --publish`. It builds from a fresh export of `HEAD` (uncommitted changes aren't included, and no per-Mac key pin gets in), fetches a Developer ID provisioning profile by exporting the `MacSigning` stub, signs with Developer ID (opProxy iCloud Relay first, inside `Contents/Helpers`), notarizes, staples, and creates GitHub release `v<version>` with the app and, for Macs running their own build, the relay on its own (`opProxy-iCloud-Relay-<version>.zip`). Push `main` first, so the tag points at the right commit.
 3. **iPhone:** `scripts/upload-phone.sh`. It archives with a build number from the time, uploads with Xcode's account, then `scripts/testflight.sh <build number>` waits for that build to be processed, adds it to the Coworkers group, and submits it for beta review (about a day; later builds of the same version are often approved automatically). Apple reviews one build per version at a time: if another is still in review, run `scripts/testflight.sh <build number>` again once it's done.
 4. **App Store:** create the new version in App Store Connect (`POST /v1/appStoreVersions` with `scripts/asc.sh`, or the web page), attach the build, update the description if needed, and submit. The listing (screenshots, text, review notes and the demo walkthrough image attached for App Review) carries over from the previous version. Screenshots are 1320×2868, from the iPhone 17 Pro Max simulator with `-shot`; the review attachment shows `-shot pairing`, `demo` and `demo-request` side by side. App Privacy is "Data Not Collected".
 
@@ -73,7 +73,7 @@ Production's schema is permanent: record types and fields can be added but never
 
 ## Gotchas
 
-- Every build of the relay must be signed with a provisioning profile: `scripts/provision-mac.sh` (development, for `install.sh` and the tests) or `release.sh`'s Developer ID profile. It shares opProxy's bundle ID and profile, but `sign-app.sh` gives it only the iCloud entitlements. CloudKit raises an exception, not an error, without one, so the relay checks the entitlement first.
+- Every build of the relay must be signed with a provisioning profile: `scripts/provision-mac.sh` (development, for `install.sh` and the tests) or `release.sh`'s Developer ID profile. It shares opProxy's bundle ID and profile, but `sign-app.sh` leaves out the approval key's keychain group. CloudKit raises an exception, not an error, without one, so the relay checks the entitlement first.
 - The approval key lives in the keychain access group `7H2524M5TN.com.chriswa.opproxy` for profile-signed builds (`KeychainSigner`); other builds use the pin `install.sh` compiles in.
 - A phone that shares the Mac's Apple ID needs no share: the Mac reads the phone's zone from its own private database. Different Apple IDs use an invite-only share; never make a share public.
 - A Mac whose share membership changed can't overwrite records it wrote before; the relay (`Sources/opProxyRelay/Relay.swift`) deletes and rewrites them ("written under an earlier membership" in the log).

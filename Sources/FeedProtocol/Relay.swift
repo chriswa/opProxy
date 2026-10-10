@@ -1,5 +1,13 @@
 import Foundation
 
+/// The version of the approval feed's messages between a Mac and a phone (APPROVAL_FEED.md),
+/// sent in the Mac's `hello`. The phone compares this, not app versions, so a Mac running its
+/// own build works with the released phone app. Raise it only for a change the other side
+/// would misread; a field it can ignore needs no change.
+public enum FeedProtocolVersion {
+    public static let current = 1
+}
+
 /// The version of the commands and events below, separate from the app version: a self-built
 /// opProxy can run with a released relay, so they check this instead. Raise it only for a
 /// change the other side would misread (a renamed or reshaped case, or one it can't do

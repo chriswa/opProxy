@@ -99,6 +99,15 @@ case "daemon":
     let pairing: PhonePairing? = PhonePairing(transport: relay)
     daemon.onPairPhone = pairing.map { pairing in { pairing.start() } }
     daemon.onShowSetup = { SetupWindow.show(paths: paths, pairing: pairing) }
+    // Phones paired before 0.3.0 (cloud-links.json) have no pairing key: ask once to pair again.
+    let oldLinks = paths.stateDir.appendingPathComponent("cloud-links.json")
+    if FileManager.default.fileExists(atPath: oldLinks.path) {
+        try? FileManager.default.removeItem(at: oldLinks)
+        if !devices.devices.isEmpty {
+            log.write("phone pairing: phones paired before 0.3.0 have to pair again")
+            if TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil, let pairing { DispatchQueue.main.async { pairing.askToPairAgain() } }
+        }
+    }
     if let file = TestKnobs.value("OPPROXY_TEST_CLOUD_PAIR"), let pairing {
         pairing.testPayloadFile = URL(fileURLWithPath: file)
         DispatchQueue.main.async { pairing.start() }

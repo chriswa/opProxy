@@ -21,10 +21,6 @@ public struct PairingKey {
     public var id: String {
         hex(Data(HMAC<SHA256>.authenticationCode(for: Data("opProxy pairing id".utf8), using: key)).prefix(16))
     }
-
-    /// SHA-256 of the derived key, for a signed pairing entry to commit to, so the Mac can
-    /// tell the key it reads back from 1Password is the one it paired with.
-    public var commitment: String { key.withUnsafeBytes { sha256Hex(Data($0)) } }
 }
 
 /// One feed record's payload, sealed with the pairing key (ChaCha20-Poly1305). The record's

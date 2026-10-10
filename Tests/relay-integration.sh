@@ -106,10 +106,14 @@ check "pairing key refused" grep -q "opProxy's own pairing key" <<<"$out"
 check "pairing key never read for a caller" bash -c "! grep -q 'read op://Personal/$ITEM' '$WORK/op-calls'"
 
 # --- after a restart the daemon reads the key back from 1Password and serves the phone again
+# (Left by a version before 0.3.0: its phones are told to pair again, once.)
 stop_daemon
 : > "$CLOUD/hello"
+echo '[]' > "$OPPROXY_HOME/cloud-links.json"
 start_daemon
 check "key read back after restart" wait_for 'grep -q "read the pairing key" "$LOG"'
+check "an update from before 0.3.0 asks to pair again" grep -q "have to pair again" "$LOG"
+check "and only once" test ! -e "$OPPROXY_HOME/cloud-links.json"
 check "the phone reads the resealed hello" wait_for 'grep -q "\"type\":\"hello\"" "$CLOUD/hello"'
 
 # --- unpairing drops the zone and deletes the key from 1Password
