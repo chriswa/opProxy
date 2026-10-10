@@ -13,6 +13,15 @@ struct OpProxyPhoneApp: App {
                 .onAppear {
                     #if DEBUG
                     if let shot = Screenshot.current { delegate.model.prepare(shot) }
+                    // `-pair <code>`: pairs as if the code were scanned, for testing from a Mac
+                    // with `devicectl device process launch`. Progress goes to the console.
+                    let arguments = ProcessInfo.processInfo.arguments
+                    if let i = arguments.firstIndex(of: "-pair"), i + 1 < arguments.count {
+                        Task {
+                            let failure = await delegate.model.pair(qr: arguments[i + 1]) { print("pairing: \($0)") }
+                            print(failure.map { "pairing failed: \($0)" } ?? "paired")
+                        }
+                    }
                     #endif
                 }
                 .onChange(of: phase, initial: true) { _, phase in delegate.model.setActive(phase == .active) }

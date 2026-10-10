@@ -5,7 +5,8 @@ opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in
 ## Layout
 
 - `Sources/FeedProtocol`: shared by the Mac and the phone. Wire types, the CloudKit layout (`CloudFeed`), documents, signed statements, `Duration`.
-- `Sources/OpProxyCore`: the Mac's logic that doesn't need AppKit. `Sources/opProxy`: the Mac app (daemon, dialog, menu, Setup, `CloudTransport`, `CloudPairing`).
+- `Sources/OpProxyCore`: the Mac's logic that doesn't need AppKit. `Sources/opProxy`: the Mac app (daemon, dialog, menu, Setup, `RelayTransport`, `PhonePairing`).
+- `Sources/opProxyRelay`: opProxy iCloud Relay, the only part that uses CloudKit. The daemon runs it as a child process while an iPhone is paired or pairing, and seals everything it hands it with the pairing's key.
 - `phone/project.yml`: the iPhone app, its notification extension, and `MacSigning`, a stub Mac app built only so Xcode makes the Mac's provisioning profiles. Generate the Xcode project with `xcodegen generate` in `phone/`; `OpProxyPhone.xcodeproj` is generated and ignored.
 - `phone/schema.ckdb`: the CloudKit schema deployed to Production.
 - `scripts/`: building, signing, releasing, App Store Connect.
@@ -36,6 +37,7 @@ opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in
 ```
 swift build && swift test           # Mac, unit tests
 bash Tests/integration.sh           # shim, daemon and feed against a stub op, a fake agent and a stand-in phone
+bash Tests/relay-integration.sh     # the daemon with the relay, offline: a stand-in CloudKit and phone, and pairing keys in a stub op
 Tests/cloud-e2e.sh                  # the CloudKit feed against real iCloud (needs the provisioning profile)
 cd phone && xcodegen generate && xcodebuild -project OpProxyPhone.xcodeproj -scheme OpProxyPhone \
     -destination 'generic/platform=iOS' -derivedDataPath build -allowProvisioningUpdates build
@@ -71,8 +73,8 @@ Production's schema is permanent: record types and fields can be added but never
 
 ## Gotchas
 
-- Every build that uses CloudKit must be signed with a provisioning profile: `scripts/provision-mac.sh` (development, for `install.sh` and the tests) or `release.sh`'s Developer ID profile. CloudKit raises an exception, not an error, without one, so `CloudTransport.available` checks the entitlement first.
+- Every build of the relay must be signed with a provisioning profile: `scripts/provision-mac.sh` (development, for `install.sh` and the tests) or `release.sh`'s Developer ID profile. It shares opProxy's bundle ID and profile, but `sign-app.sh` gives it only the iCloud entitlements. CloudKit raises an exception, not an error, without one, so the relay checks the entitlement first.
 - The approval key lives in the keychain access group `7H2524M5TN.com.chriswa.opproxy` for profile-signed builds (`KeychainSigner`); other builds use the pin `install.sh` compiles in.
 - A phone that shares the Mac's Apple ID needs no share: the Mac reads the phone's zone from its own private database. Different Apple IDs use an invite-only share; never make a share public.
-- A Mac whose share membership changed can't overwrite records it wrote before; `CloudTransport` deletes and rewrites them ("written under an earlier membership" in the log).
+- A Mac whose share membership changed can't overwrite records it wrote before; the relay (`Sources/opProxyRelay/Relay.swift`) deletes and rewrites them ("written under an earlier membership" in the log).
 - `~/.opProxy/daemon.log` is the Mac's log; on the phone, `xcrun devicectl device process launch --console --terminate-existing --device <id> com.chriswa.opproxy.phone` shows `print` output.
