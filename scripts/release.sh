@@ -71,5 +71,7 @@ echo "== built $ZIP and $RELAY_ZIP"
 
 if [ "$PUBLISH" = "--publish" ]; then
     gh release create "v$VERSION" "$ZIP" "$RELAY_ZIP" --repo chriswa/opProxy --title "opProxy $VERSION" \
-        --notes "Unzip, move opProxy.app to Applications and open it; its Setup window takes it from there. Building opProxy yourself? Put opProxy iCloud Relay.app in Applications so it can reach your iPhone."
+        --notes "Unzip opProxy-$VERSION.zip, move opProxy.app to Applications and open it; its Setup window takes it from there. The iCloud Relay is already inside it, so there's nothing else to install.
+
+Only if you build opProxy yourself: also unzip opProxy-iCloud-Relay-$VERSION.zip and put opProxy iCloud Relay.app in Applications, so your build can reach your iPhone."
 fi
