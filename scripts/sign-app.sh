@@ -26,7 +26,7 @@ import hashlib, plistlib, sys
 for der in plistlib.loads(sys.stdin.buffer.read())["DeveloperCertificates"]:
     print(hashlib.sha1(der).hexdigest().upper())' | while read -r SHA; do
         grep -q "$SHA" <<<"$IDENTITIES" && { echo "$SHA"; break; }
-    done)
+    done || true)
     if [ -n "$IDENTITY" ]; then
         echo "signing with profile: $(grep "$IDENTITY" <<<"$IDENTITIES" | awk -F'"' '{print $2}')"
         cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"

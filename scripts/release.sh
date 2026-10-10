@@ -11,6 +11,9 @@ VERSION=$(cat "$ROOT/VERSION")
 PUBLISH=${1:-}
 grep -q "MARKETING_VERSION: \"$VERSION\"" "$ROOT/phone/project.yml" \
     || { echo "phone/project.yml's version isn't $VERSION: run scripts/bump-version.sh"; exit 1; }
+# codesign needs the certificate's private key here; Xcode's cloud signing only covers the stub.
+security find-identity -v -p codesigning | grep -q "Developer ID Application" || { echo "no Developer ID Application" \
+    "certificate in the keychain: add one in Xcode → Settings → Accounts → Manage Certificates (Account Holder only)"; exit 1; }
 OUT="$ROOT/.build/release-$VERSION"
 rm -rf "$OUT" && mkdir -p "$OUT/src"
 [ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ] || echo "note: uncommitted changes aren't in the release"
