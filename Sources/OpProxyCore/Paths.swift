@@ -34,8 +34,8 @@ public struct Paths {
     public var macID: URL { stateDir.appendingPathComponent("mac-id") }
     /// Optional settings (OpProxyConfig).
     public var config: URL { stateDir.appendingPathComponent("config.json") }
-    /// The paired iPhones' CloudKit zones the Mac has joined.
-    public var cloudLinks: URL { stateDir.appendingPathComponent("cloud-links.json") }
+    /// The paired iPhones' zones opProxy iCloud Relay serves, with each pairing key's 1Password item.
+    public var relayLinks: URL { stateDir.appendingPathComponent("relay-links.json") }
     /// Phones allowed to answer approvals, each entry signed with the approval key.
     public var pairedDevices: URL { stateDir.appendingPathComponent("paired-devices.json") }
 

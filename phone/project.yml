@@ -42,6 +42,8 @@ targets:
         com.apple.developer.icloud-services: [CloudKit]
         com.apple.developer.icloud-container-environment: Production
         com.apple.developer.usernotifications.time-sensitive: true
+        # Pairing keys (PairingSecrets), shared with the notification extension.
+        keychain-access-groups: [$(AppIdentifierPrefix)com.chriswa.opproxy.phone]
     dependencies:
       - target: OpProxyPhoneNotifications
       - package: opProxy
@@ -67,6 +69,7 @@ targets:
         com.apple.developer.icloud-container-identifiers: [iCloud.com.chriswa.opproxy]
         com.apple.developer.icloud-services: [CloudKit]
         com.apple.developer.icloud-container-environment: Production
+        keychain-access-groups: [$(AppIdentifierPrefix)com.chriswa.opproxy.phone]
     dependencies:
       - package: opProxy
         product: FeedProtocol

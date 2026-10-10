@@ -4,7 +4,8 @@ import UserNotifications
 
 /// Turns CloudKit's generic "new request" push into the request itself: the push carries
 /// only the record's ID, and its contents are encrypted values only this user's devices can
-/// read. Meanwhile it takes down the notifications of earlier requests that are over, in case
+/// read (in a sealed zone, sealed besides; without its pairing key the generic text stays).
+/// Meanwhile it takes down the notifications of earlier requests that are over, in case
 /// the silent pushes that would have woken the app for them didn't arrive.
 final class NotificationService: UNNotificationServiceExtension {
     private var content: UNMutableNotificationContent?
@@ -22,13 +23,13 @@ final class NotificationService: UNNotificationServiceExtension {
             let db = CKContainer(identifier: CloudFeed.container).privateCloudDatabase
             async let cleared: Void = Self.clearOverRequests(in: db, except: id)
             if let record = try? await db.record(for: id),
-               let json = record.encryptedValues[CloudFeed.Item.item] as? String,
+               let json = PairingSecrets.macField(CloudFeed.Item.item, of: record),
                let item = FeedItem.parse(json), let doc = item.parsed {
                 content.title = doc.title
                 content.subtitle = doc.subtitle ?? ""
                 // Which Mac, for a phone paired with several: its name is in the zone's hello.
                 if let hello = try? await db.record(for: CKRecord.ID(recordName: CloudFeed.State.hello, zoneID: id.zoneID)),
-                   let json = hello.encryptedValues[CloudFeed.State.message] as? String,
+                   let json = PairingSecrets.macField(CloudFeed.State.message, of: hello),
                    let message = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any],
                    let name = (message["mac"] as? [String: Any])?["name"] as? String {
                     content.subtitle = [content.subtitle, "on \(name)"].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -51,8 +52,8 @@ final class NotificationService: UNNotificationServiceExtension {
         let over = Set(results.compactMap { id, result -> CKRecord.ID? in
             switch result {
             case .success(let record):
-                let expires = (record.encryptedValues[CloudFeed.Item.item] as? String).flatMap(FeedItem.parse)?.expires
-                return record.encryptedValues[CloudFeed.Item.note] != nil || (expires.map { $0 < Date() } ?? false) ? id : nil
+                let expires = PairingSecrets.macField(CloudFeed.Item.item, of: record).flatMap(FeedItem.parse)?.expires
+                return PairingSecrets.macField(CloudFeed.Item.note, of: record) != nil || (expires.map { $0 < Date() } ?? false) ? id : nil
             case .failure(let error):
                 return (error as? CKError)?.code == .unknownItem ? id : nil
             }

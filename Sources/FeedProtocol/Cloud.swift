@@ -9,6 +9,8 @@ import Foundation
 public enum CloudFeed {
     public static let container = "iCloud.com.chriswa.opproxy"
     public static let zonePrefix = "feed-"
+    /// Zones of pairings whose records are sealed with a pairing key (Rendezvous version 4).
+    public static let sealedZonePrefix = "pair-"
     /// The single zone of phones paired before a phone could serve several Macs.
     public static let legacyZoneName = "approvalFeed"
 
@@ -80,6 +82,29 @@ public enum CloudFeed {
                   parts[4].range(of: "^[a-z0-9-]{8,64}$", options: .regularExpression) != nil,
                   let code = unbase64url(parts[2]), code.count == 16 else { return nil }
             return (code, parts[3], parts[4])
+        }
+
+        /// Version 4, for a Mac whose feed is sealed with a pairing key (`PairingKey`): the code
+        /// also carries the Mac's one-time X25519 public key for `PairingHandshake`, and the
+        /// phone's zone is named after the code rather than the Mac, so every pairing gets its
+        /// own. `opproxy-pair:4:<code>:<Mac's user record name>:<Mac's ID>:<agreement key>`.
+        public static func qrPayload(code: Data, macUser: String, macID: String, agreementKey: Data) -> String {
+            "\(scheme):4:\(base64url(code)):\(macUser):\(macID):\(base64url(agreementKey))"
+        }
+
+        /// A version 4 code: nil for anything else, including version 3 (`parse(qr:)`).
+        public static func parseSealed(qr payload: String) -> (code: Data, macUser: String, macID: String, agreementKey: Data)? {
+            let parts = payload.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 6, parts[0] == scheme, parts[1] == "4", !parts[3].isEmpty,
+                  parts[4].range(of: "^[a-z0-9-]{8,64}$", options: .regularExpression) != nil,
+                  let code = unbase64url(parts[2]), code.count == 16,
+                  let key = unbase64url(parts[5]), key.count == 32 else { return nil }
+            return (code, parts[3], parts[4], key)
+        }
+
+        /// The zone a version 4 pairing uses: named after the pairing's one-time code.
+        public static func zoneName(code: Data) -> String {
+            sealedZonePrefix + hex(Data(HMAC<SHA256>.authenticationCode(for: Data("zone".utf8), using: SymmetricKey(data: code))).prefix(16))
         }
 
         public static func recordName(code: Data) -> String {

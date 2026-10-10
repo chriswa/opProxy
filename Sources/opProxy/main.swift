@@ -83,14 +83,20 @@ case "daemon":
     auth.promptObserver = authContext
     do { try daemon.start() } catch { fail("could not start: \(error)") }
     feed.authStatus = { (auth.current, auth.isRefreshing) }
-    // CloudKit needs a build signed with the provisioning profile; without it there's no phone.
-    let cloud = CloudTransport.available ? CloudTransport(linksURL: paths.cloudLinks, log: log) : nil
-    var transports: [FeedTransport] = [cloud].compactMap { $0 }
+    // iPhones are reached through opProxy iCloud Relay, the separately signed helper that
+    // holds CloudKit; it only runs while there's a phone to serve.
+    let relay = RelayTransport(linksURL: paths.relayLinks, vault: PairingKeyVault {
+                                   // Keys are only read once authorized; saving or deleting one may prompt.
+                                   auth.run($0, extraEnv: [:], reason: $0.prefix(2) == ["item", "delete"] ? .unpairing : .pairingKey)
+                               },
+                               devices: devices, identity: { MacIdentity.current(paths) },
+                               authorized: { auth.current.signedIn }, log: log)
+    var transports: [FeedTransport] = [relay]
     #if OPPROXY_TESTING
     transports.append(FeedSocket(path: paths.approvalFeed, log: log))
     #endif
     feed.start(transports)
-    let pairing = cloud.map { CloudPairing(transport: $0, log: log, paths: paths) }
+    let pairing: PhonePairing? = PhonePairing(transport: relay)
     daemon.onPairPhone = pairing.map { pairing in { pairing.start() } }
     daemon.onShowSetup = { SetupWindow.show(paths: paths, pairing: pairing) }
     if let file = TestKnobs.value("OPPROXY_TEST_CLOUD_PAIR"), let pairing {
@@ -116,9 +122,6 @@ case "keygen":
     } catch { fail("could not create the Secure Enclave approval key: \(error)") }
 
 #if OPPROXY_TESTING
-case "test-cloud-phone":
-    CloudTestPhone.run(Array(arguments.dropFirst(2)), paths: paths)
-
 case "render-dialog":
     DialogPreview.render(to: URL(fileURLWithPath: arguments.dropFirst(2).first { !$0.hasPrefix("-") } ?? "."),
                          onScreen: arguments.contains("--on-screen"))

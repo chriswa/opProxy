@@ -359,7 +359,7 @@ final class Daemon {
 
     /// Opens the Setup window. Set by main.
     var onShowSetup: (() -> Void)?
-    /// Opens the pairing QR code; nil when this build can't use CloudKit.
+    /// Opens the pairing QR code.
     var onPairPhone: (() -> Void)?
 
     func status(error: String? = nil) -> DaemonStatus {
@@ -443,6 +443,11 @@ final class Daemon {
             return refusal.response
         }
         tag += " → \(target.label)"
+        // A pairing key lets whoever holds it post requests to the phone, so no approval covers it.
+        if PairingKeyVault.isPairingKey(title: target.title) {
+            log.write("refused (pairing key): \(tag)")
+            return .failure("“\(target.title)” is opProxy's own pairing key; opProxy never hands it out.")
+        }
         let argv = item.pinned(to: target)
         let key: DialogKey
         switch caller {

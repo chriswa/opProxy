@@ -8,6 +8,8 @@ enum AuthReason: String {
     case capReached = "The previous authorization reached 1Password's 12-hour limit."
     case manual = "You chose Refresh Now."
     case request = "A request needs 1Password, and opProxy isn't authorized yet."
+    case pairingKey = "opProxy is saving the iPhone you're pairing's key in 1Password."
+    case unpairing = "opProxy is deleting an unpaired iPhone's key from 1Password."
 }
 
 /// Shows context while 1Password's own prompt may be on screen.
@@ -73,14 +75,15 @@ final class AuthTracker {
         }
     }
 
-    func run(_ argv: [String], extraEnv: [String: String], timeout: TimeInterval = 300) -> ProxyResponse {
+    func run(_ argv: [String], extraEnv: [String: String], timeout: TimeInterval = 300,
+             reason: AuthReason = .request) -> ProxyResponse {
         let s: OpSession
         do { s = try currentSession() } catch {
             return .failure("could not start the 1Password session helper: \(error)")
         }
         let isProbe = argv == ["whoami"]
         // Unauthorized, so this may raise 1Password's prompt: explain it alongside.
-        let dismiss = argv.first != "whoami" && !current.signedIn ? promptObserver?.authorizationMayPrompt(.request) : nil
+        let dismiss = argv.first != "whoami" && !current.signedIn ? promptObserver?.authorizationMayPrompt(reason) : nil
         let runArgv = isProbe && extraEnv["OP_ACCOUNT"] == nil ? whoamiArgv(s) : argv
         let response = s.run(runArgv, extraEnv: extraEnv, timeout: timeout)
         dismiss?()

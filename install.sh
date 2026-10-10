@@ -21,6 +21,15 @@ APP="$ROOT/bin/opProxy.app"
 EXE="$APP/Contents/MacOS/opProxy"
 "$ROOT/scripts/assemble-app.sh" "$ROOT/.build/release/opProxy" "$APP"
 "$ROOT/scripts/sign-app.sh" "$APP"
+# opProxy iCloud Relay, beside the app, only if it can be signed for CloudKit (a profile from
+# provision-mac.sh): otherwise opProxy uses one from Applications, downloaded from the releases.
+RELAY="$ROOT/bin/opProxy iCloud Relay.app"
+rm -rf "$RELAY"
+"$ROOT/scripts/assemble-app.sh" "$ROOT/.build/release/opProxyRelay" "$RELAY" relay
+if ! "$ROOT/scripts/sign-app.sh" "$RELAY" | tee /dev/stderr | grep -q "signing with profile"; then
+    rm -rf "$RELAY"
+    echo "no relay built: to reach an iPhone, put opProxy iCloud Relay (from the GitHub releases) in Applications"
+fi
 # `op` (the shim) and `opProxy` (the CLI) run the bundle's executable.
 rm -f "$ROOT/bin/opProxy"
 ln -sfn opProxy.app/Contents/MacOS/opProxy "$ROOT/bin/opProxy"

@@ -1,16 +1,16 @@
 # The approval feed
 
-How opProxy on a Mac publishes the requests it would ask about to paired iPhones, and how a phone answers. `Sources/FeedProtocol` implements the shared parts; the Mac's side is `ApprovalFeed` and `CloudTransport`, the phone's is `phone/App/FeedModel.swift`.
+How opProxy on a Mac publishes the requests it would ask about to paired iPhones, and how a phone answers. `Sources/FeedProtocol` implements the shared parts; the Mac's side is `ApprovalFeed` and `RelayTransport`, which reaches CloudKit through opProxy iCloud Relay (`Sources/opProxyRelay`), and the phone's is `phone/App/FeedModel.swift`.
 
 ## Who knows what
 
 - **The Mac** owns everything about a request: what it shows, which options it offers, what they mean, and whether a reply is good enough to act on. It describes each request as a **document**, presentation data the phone draws without knowing what a 1Password item is.
-- **iCloud only carries it.** Anything that can write to a zone could try to answer, so the Mac trusts a reply only because a paired phone's Secure Enclave key signed it, never because of where it came from.
+- **iCloud only carries it.** Anything that can write to a zone could try to answer, so the Mac trusts a reply only because a paired phone's Secure Enclave key signed it, never because of where it came from. In a sealed zone, every field is also sealed with a key only that Mac and phone hold, so the relay and iCloud carry ciphertext, and nothing else can post a request for the phone to sign.
 - **The phone** draws the document and signs its answers.
 
 ## CloudKit layout
 
-Container `iCloud.com.chriswa.opproxy`, Production environment, schema `phone/schema.ckdb`. For each Mac it's paired with, the phone owns a zone named `feed-<mac id>` in its private database, shared with that Mac's iCloud account alone (invited by user record, never open to whoever holds the link). When the phone and Mac share an Apple ID, there's no share: the Mac reads the zone from its own private database. Every field below is an encrypted value.
+Container `iCloud.com.chriswa.opproxy`, Production environment, schema `phone/schema.ckdb`. For each Mac it's paired with, the phone owns a zone in its private database (`pair-<from the pairing code>` for a sealed pairing, `feed-<mac id>` for one from before), shared with that Mac's iCloud account alone (invited by user record, never open to whoever holds the link). When the phone and Mac share an Apple ID, there's no share: the Mac reads the zone from its own private database. Every field below is an encrypted value.
 
 | Record type | Name | Written by | Holds |
 |---|---|---|---|
@@ -21,14 +21,17 @@ Container `iCloud.com.chriswa.opproxy`, Production environment, schema `phone/sc
 | `FeedInbox` | random | phone | `message`: a reply or pair message; `response`: the Mac's answer to it |
 | `PairingRendezvous` | from the pairing code | phone, public database | `sealed`: the invitation, sealed with the code |
 
+In a sealed zone each field holds the base64 of a sealed copy of the value above (`SealedField`): ChaCha20-Poly1305 under the pairing key, authenticating the record type, field, record name and which side wrote it, with the time it was sealed inside. The exceptions come before the key exists: the `pair` message and its `pair-result`, and an empty `hello` the Mac writes to show it joined.
+
 The Mac removes an answered or timed-out item by setting its `note`, and deletes it 10 minutes later. The phone subscribes to new `FeedItem` records in each zone, and silently to their updates and deletions so it can take down notifications for requests that are over. That is why it owns the zones: only a zone's owner can make those subscriptions. A phone treats a Mac whose `presence` is more than 90 seconds old, with requests pending, as asleep or offline.
 
 ## Pairing
 
-1. The Mac's QR code holds `opproxy-pair:3:<code>:<Mac's iCloud user record name>:<Mac ID>`, where the code is 16 random bytes, base64url.
-2. The phone makes the zone `feed-<Mac ID>`, invites that iCloud user to it with read/write (or, on the same Apple ID, shares nothing), and writes a `PairingRendezvous` record to the public database: named by an HMAC of the code, holding the invitation (`{"share": url}` or `{"ownZone": name}`) sealed with ChaCha20-Poly1305 under a key derived from the code. Only someone who saw the code can find it or open it.
+1. The Mac's QR code holds `opproxy-pair:4:<code>:<Mac's iCloud user record name>:<Mac ID>:<agreement key>`, where the code is 16 random bytes and the agreement key a one-time X25519 public key, both base64url. (Version 3 had no agreement key and an unsealed zone named after the Mac; the phone still pairs with Macs that show one.)
+2. The phone makes the zone `pair-<HMAC of the code>`, invites that iCloud user to it with read/write (or, on the same Apple ID, shares nothing), and writes a `PairingRendezvous` record to the public database: named by an HMAC of the code, holding the invitation (`{"share": url}` or `{"ownZone": name}`) sealed with ChaCha20-Poly1305 under a key derived from the code. Only someone who saw the code can find it or open it.
 3. The Mac accepts the share, refusing one open to anyone with its link, and writes its `hello`.
-4. The phone sends `{"type":"pair","publicKey":"<base64>","name":"iPhone"}` to the inbox. The Mac shows the phone's name and key fingerprint, and pairs it only once you confirm with Touch ID. The answer is `{"type":"pair-result","keyId":"…","ok":true}` or `ok: false` with an `error`.
+4. The phone sends `{"type":"pair","publicKey":"<base64>","name":"iPhone","agreementKey":"<base64>","agreementSignature":"<base64>"}` to the inbox: its own one-time X25519 key, signed by its Secure Enclave key over the Mac's agreement key and ID (`PairingHandshake.phoneStatement`). The Mac shows the phone's name and key fingerprint, and pairs it only once you confirm with Touch ID.
+5. The Mac has 1Password generate the pairing secret, in a Password item titled "opProxy pairing key: …" that opProxy never hands out, and seals it to the key the two agreement keys give (`PairingHandshake`). The answer is `{"type":"pair-result","keyId":"…","ok":true,"sealedSecret":"<base64>"}` or `ok: false` with an `error`. From then on, both sides seal every field. Pairing again replaces the phone's earlier pairing with that Mac, and unpairing deletes the zone and the secret on both sides.
 
 ## Item
 

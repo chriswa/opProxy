@@ -177,7 +177,9 @@ struct QRScanner: UIViewControllerRepresentable {
 
         func dataScanner(_ scanner: DataScannerViewController, didAdd items: [RecognizedItem], allItems: [RecognizedItem]) {
             for case .barcode(let code) in items {
-                guard !done, let payload = code.payloadStringValue, CloudFeed.Rendezvous.parse(qr: payload) != nil else { continue }
+                guard !done, let payload = code.payloadStringValue,
+                      CloudFeed.Rendezvous.parseSealed(qr: payload) != nil || CloudFeed.Rendezvous.parse(qr: payload) != nil
+                else { continue }
                 done = true
                 scanner.stopScanning()
                 found(payload)

@@ -13,6 +13,8 @@ let package = Package(
         .target(name: "FeedProtocol"),
         .target(name: "OpProxyCore", dependencies: ["FeedProtocol"], swiftSettings: testing),
         .executableTarget(name: "opProxy", dependencies: ["OpProxyCore"], swiftSettings: testing),
+        // opProxy iCloud Relay: the only part signed for CloudKit (Sources/opProxyRelay/main.swift).
+        .executableTarget(name: "opProxyRelay", dependencies: ["FeedProtocol"], swiftSettings: testing),
         .testTarget(name: "OpProxyCoreTests", dependencies: ["OpProxyCore"], swiftSettings: testing),
     ]
 )

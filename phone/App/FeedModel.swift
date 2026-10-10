@@ -1,4 +1,5 @@
 import CloudKit
+import CryptoKit
 import FeedProtocol
 import Foundation
 import SwiftUI
@@ -9,6 +10,8 @@ struct MacFeed: Equatable {
     let zoneID: CKRecordZone.ID
     /// What the Mac calls itself.
     var name: String?
+    /// The Mac's ID (`MacIdentity`), from its `hello`.
+    var macID: String?
     /// What this phone calls it, if set here.
     var nickname: String?
     /// The opProxy version it runs, from its `hello`; nil from versions that didn't say.
@@ -273,6 +276,7 @@ final class FeedModel: ObservableObject {
                 changed += changes.modifications.map(\.zoneID)
                 for deletion in changes.deletions {
                     macs[deletion.zoneID.zoneName] = nil
+                    PairingSecrets.delete(zone: deletion.zoneID.zoneName)
                     zoneTokens[deletion.zoneID.zoneName] = nil
                     subscribed.remove(deletion.zoneID.zoneName)
                 }
@@ -283,7 +287,7 @@ final class FeedModel: ObservableObject {
                 if zone.zoneName == CloudFeed.legacyZoneName {
                     // From before a phone could serve several Macs: that Mac pairs again.
                     _ = try? await db.deleteRecordZone(withID: zone)
-                } else if zone.zoneName.hasPrefix(CloudFeed.zonePrefix) {
+                } else if zone.zoneName.hasPrefix(CloudFeed.zonePrefix) || zone.zoneName.hasPrefix(CloudFeed.sealedZonePrefix) {
                     try await fetch(zone)
                 }
             }
@@ -324,8 +328,8 @@ final class FeedModel: ObservableObject {
     private func apply(_ record: CKRecord, zone: CKRecordZone.ID) {
         switch record.recordType {
         case CloudFeed.Item.type:
-            guard let json = record.encryptedValues[CloudFeed.Item.item] as? String, let item = FeedItem.parse(json) else { return }
-            let answered = record.encryptedValues[CloudFeed.Item.note] != nil
+            guard let json = PairingSecrets.macField(CloudFeed.Item.item, of: record), let item = FeedItem.parse(json) else { return }
+            let answered = PairingSecrets.macField(CloudFeed.Item.note, of: record) != nil
             updateMac(zone) { mac in
                 mac.items.removeAll { $0.id == item.id }
                 if !answered {
@@ -334,14 +338,19 @@ final class FeedModel: ObservableObject {
                 }
             }
         case CloudFeed.State.type:
-            guard let json = record.encryptedValues[CloudFeed.State.message] as? String,
+            // A sealed zone's Mac writes an empty `hello` until it has handed over the pairing
+            // key: that it wrote one at all says it joined.
+            if record.recordID.recordName == CloudFeed.State.hello {
+                updateMac(zone) { $0.helloWrittenAt = record.modificationDate }
+            }
+            guard let json = PairingSecrets.macField(CloudFeed.State.message, of: record),
                   let message = try? JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any] else { return }
             updateMac(zone) { mac in
                 switch record.recordID.recordName {
                 case CloudFeed.State.hello:
-                    mac.helloWrittenAt = record.modificationDate
                     mac.pairedKeys = message["pairedKeys"] as? [String] ?? []
                     mac.name = (message["mac"] as? [String: Any])?["name"] as? String
+                    mac.macID = (message["mac"] as? [String: Any])?["id"] as? String
                     mac.version = (message["mac"] as? [String: Any])?["version"] as? String
                 case CloudFeed.State.presence:
                     mac.presenceAt = (message["aliveAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000) }
@@ -406,24 +415,34 @@ final class FeedModel: ObservableObject {
     nonisolated private static let answerTimeout: TimeInterval = 15
 
     /// Writes `message` to the zone's inbox and waits for the Mac's answer: nil if it was
-    /// accepted, else why not.
-    func send(_ message: [String: Any], to zone: CKRecordZone.ID, timeout: TimeInterval = FeedModel.answerTimeout) async -> String? {
+    /// accepted and `accepted` finds nothing wrong with it, else why not. In a sealed zone both
+    /// are sealed once there's a pairing key; until then (the `pair` message) neither is.
+    func send(_ message: [String: Any], to zone: CKRecordZone.ID, timeout: TimeInterval = FeedModel.answerTimeout,
+              accepted: ([String: Any]) -> String? = { _ in nil }) async -> String? {
         do {
             let record = CKRecord(recordType: CloudFeed.Inbox.type,
                                   recordID: CKRecord.ID(recordName: UUID().uuidString, zoneID: zone))
             let data = try JSONSerialization.data(withJSONObject: message, options: [.sortedKeys, .withoutEscapingSlashes])
-            record.encryptedValues[CloudFeed.Inbox.message] = String(decoding: data, as: UTF8.self)
+            let key = PairingSecrets.key(zone: zone.zoneName)
+            let text = String(decoding: data, as: UTF8.self)
+            record.encryptedValues[CloudFeed.Inbox.message] = try key.map {
+                try SealedField.seal(text, with: $0, recordType: CloudFeed.Inbox.type, field: CloudFeed.Inbox.message,
+                                     recordName: record.recordID.recordName, from: .phone)
+            } ?? text
             _ = try await db.save(record)
             let deadline = Date() + timeout
             while Date() < deadline {
                 try await Task.sleep(nanoseconds: 500_000_000)
                 let current = try await db.record(for: record.recordID)
-                guard let text = current.encryptedValues[CloudFeed.Inbox.response] as? String,
+                guard let text = key == nil ? current.encryptedValues[CloudFeed.Inbox.response] as? String
+                        : PairingSecrets.macField(CloudFeed.Inbox.response, of: current),
                       let response = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { continue }
                 // The inbox record has served its purpose.
                 _ = try? await db.deleteRecord(withID: record.recordID)
+                let error = response["ok"] as? Bool == true ? accepted(response)
+                    : (response["error"] as? String ?? "The Mac refused it.")
                 await refresh()
-                return response["ok"] as? Bool == true ? nil : (response["error"] as? String ?? "The Mac refused it.")
+                return error
             }
             // Left unanswered, the Mac refuses it as too old if it wakes later.
             _ = try? await db.deleteRecord(withID: record.recordID)
@@ -470,16 +489,46 @@ final class FeedModel: ObservableObject {
         subscribed.remove(mac.zoneID.zoneName)
         update(\.rememberedMacs, rememberedMacs.filter { $0.key != mac.zoneID.zoneName })
         nicknames[mac.zoneID.zoneName] = nil
+        PairingSecrets.delete(zone: mac.zoneID.zoneName)
         return nil
     }
 
     /// Makes a zone for the Mac whose QR code was scanned and shares it with that Mac, waits
-    /// for it to join, then asks it to trust this phone's key. Returns nil once paired, else why not.
+    /// for it to join, then asks it to trust this phone's key. A version 4 code's zone is new
+    /// and sealed: the Mac's answer brings the pairing key, and once it has, the Mac's earlier
+    /// pairings with this phone are deleted. Returns nil once paired, else why not.
     func pair(qr: String, progress: @escaping (String) -> Void) async -> String? {
-        guard let (code, macUser, macID) = CloudFeed.Rendezvous.parse(qr: qr) else {
+        let code: Data, macUser: String, macID: String, zone: CKRecordZone.ID
+        /// Version 4: this attempt's agreement key, and the Mac's.
+        let handshake: (phoneKey: Curve25519.KeyAgreement.PrivateKey, macKey: Data)?
+        if let offer = CloudFeed.Rendezvous.parseSealed(qr: qr) {
+            (code, macUser, macID) = (offer.code, offer.macUser, offer.macID)
+            zone = CKRecordZone.ID(zoneName: CloudFeed.Rendezvous.zoneName(code: offer.code))
+            handshake = (Curve25519.KeyAgreement.PrivateKey(), offer.agreementKey)
+        } else if let offer = CloudFeed.Rendezvous.parse(qr: qr) {
+            (code, macUser, macID) = offer
+            zone = CKRecordZone.ID(zoneName: CloudFeed.zoneName(macID: macID))
+            handshake = nil
+        } else {
             return "That isn't an opProxy pairing code. If it came from an older Mac version, update it there."
         }
-        let zone = CKRecordZone.ID(zoneName: CloudFeed.zoneName(macID: macID))
+        let error = await pair(zone: zone, code: code, macUser: macUser, macID: macID, handshake: handshake, progress: progress)
+        if error == nil {
+            for old in macs.values where old.zoneID != zone
+                && (old.macID == macID || old.zoneID.zoneName == CloudFeed.zoneName(macID: macID)) {
+                _ = await unpair(old)
+            }
+        } else if handshake != nil {
+            // A sealed zone is this attempt's alone; one that didn't pair is no use to anyone.
+            _ = try? await db.deleteRecordZone(withID: zone)
+            PairingSecrets.delete(zone: zone.zoneName)
+        }
+        return error
+    }
+
+    private func pair(zone: CKRecordZone.ID, code: Data, macUser: String, macID: String,
+                      handshake: (phoneKey: Curve25519.KeyAgreement.PrivateKey, macKey: Data)?,
+                      progress: @escaping (String) -> Void) async -> String? {
         let rendezvousID = CKRecord.ID(recordName: CloudFeed.Rendezvous.recordName(code: code))
         defer { Task { [db = container.publicCloudDatabase] in _ = try? await db.deleteRecord(withID: rendezvousID) } }
         do {
@@ -503,8 +552,23 @@ final class FeedModel: ObservableObject {
 
             // Sent even when already paired: the Mac answers at once, and its window closes.
             progress("Confirm on the Mac: check it shows the fingerprint below, then use Touch ID.")
-            if let error = await send(FeedReply.pair(publicKey: PhoneKey.publicKey, name: UIDevice.current.name),
-                                      to: zone, timeout: 120) { return error }
+            var message = FeedReply.pair(publicKey: PhoneKey.publicKey, name: UIDevice.current.name)
+            if let handshake {
+                let mine = handshake.phoneKey.publicKey.rawRepresentation
+                let statement = PairingHandshake.phoneStatement(phoneAgreementKey: mine, macAgreementKey: handshake.macKey, macID: macID)
+                message[PairingHandshake.agreementKeyField] = mine.base64EncodedString()
+                message[PairingHandshake.agreementSignatureField] = try PhoneKey.sign(statement).base64EncodedString()
+            }
+            if let error = await send(message, to: zone, timeout: 120, accepted: { response in
+                guard let handshake else { return nil }
+                guard let sealed = (response[PairingHandshake.sealedSecretField] as? String).flatMap({ Data(base64Encoded: $0) })
+                else { return "The Mac paired without sending a pairing key. Update opProxy on the Mac, then pair again." }
+                guard let secret = try? PairingHandshake.openSecret(sealed, phoneKey: handshake.phoneKey,
+                                                                    macAgreementKey: handshake.macKey,
+                                                                    phoneDeviceKey: PhoneKey.publicKey, macID: macID)
+                else { return "The pairing key from the Mac didn't open. Pair again." }
+                return PairingSecrets.save(secret, zone: zone.zoneName) ? nil : "Couldn't keep the pairing key in this phone's keychain."
+            }) { return error }
             try await fetch(zone, fromScratch: true)
             await refresh()
             return nil

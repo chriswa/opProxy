@@ -6,8 +6,8 @@ import OpProxyCore
 /// it's gone. The menu shows the exact expiry and offers an early refresh.
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let daemon: Daemon
-    /// Present when this build can use CloudKit (it's signed with the provisioning profile).
-    private let pairing: CloudPairing?
+    /// Pairs an iPhone through opProxy iCloud Relay.
+    private let pairing: PhonePairing?
     private let paths: Paths
     private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -23,7 +23,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var lastError: String?
     private var timer: Timer?
 
-    init(daemon: Daemon, pairing: CloudPairing?, paths: Paths) {
+    init(daemon: Daemon, pairing: PhonePairing?, paths: Paths) {
         self.daemon = daemon
         self.pairing = pairing
         self.paths = paths

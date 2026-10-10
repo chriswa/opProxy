@@ -1,8 +1,8 @@
 #!/bin/bash
-# End-to-end test of the CloudKit approval feed against real iCloud: a signed debug daemon,
-# and `opProxy test-cloud-phone` playing the iPhone app from a zone in this Mac's own
-# private database. Needs scripts/provision-mac.sh to have run and this Mac signed in to
-# iCloud. Not part of integration.sh, which runs offline.
+# End-to-end test of the CloudKit approval feed against real iCloud: a debug daemon, a signed
+# debug opProxy iCloud Relay, and `opProxyRelay test-phone` playing the iPhone app from a zone
+# in this Mac's own private database. Needs scripts/provision-mac.sh to have run and this Mac
+# signed in to iCloud. Not part of integration.sh or relay-integration.sh, which run offline.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 swift build --package-path "$ROOT" >/dev/null || exit 1
@@ -14,18 +14,26 @@ unset CLAUDE_CODE_SESSION_ID CLAUDE_SESSION_ID CODEX_THREAD_ID \
     CURSOR_CONVERSATION_ID CURSOR_AGENT_CHAT_ID
 
 # CloudKit only works in a signed bundle with the provisioning profile.
-APP="$WORK/opProxy.app"
-"$ROOT/scripts/assemble-app.sh" "$ROOT/.build/debug/opProxy" "$APP"
-"$ROOT/scripts/sign-app.sh" "$APP" | grep -q "signing with CloudKit" || { echo "no CloudKit profile: run scripts/provision-mac.sh"; exit 1; }
-BIN="$APP/Contents/MacOS/opProxy"
+RELAY_APP="$WORK/opProxy iCloud Relay.app"
+"$ROOT/scripts/assemble-app.sh" "$ROOT/.build/debug/opProxyRelay" "$RELAY_APP" relay
+"$ROOT/scripts/sign-app.sh" "$RELAY_APP" | grep -q "signing with profile" || { echo "no profile: run scripts/provision-mac.sh"; exit 1; }
+export OPPROXY_RELAY="$RELAY_APP/Contents/MacOS/opProxyRelay"
+PHONE() { "$OPPROXY_RELAY" test-phone "$@"; }
+BIN="$ROOT/.build/debug/opProxy"
 OP="$WORK/op"
 ln -s "$BIN" "$OP"
 
+# The pairing key is kept as a file: \$WORK/pairing-key.
 cat > "$OPPROXY_REAL_OP" <<STUB
 #!/bin/bash
 case "\$*" in
   whoami*) exit 0 ;;
   "item list --format json"*) echo '[{"id": "cloud", "title": "cloud", "vault": {"id": "v", "name": "v"}}]'; exit 0 ;;
+  "item create "*)
+    printf '{"id":"pk","title":"opProxy pairing key: e2e","category":"PASSWORD","tags":["opproxy-pairing"],"fields":[{"id":"password","purpose":"PASSWORD","value":"%s"}]}' \
+        "\$(openssl rand -hex 32)" | tee "$WORK/pairing-key"; exit 0 ;;
+  "item get pk "*) cat "$WORK/pairing-key"; exit 0 ;;
+  "item delete pk") rm -f "$WORK/pairing-key"; exit 0 ;;
 esac
 echo "stub ran: \$*"
 STUB
@@ -41,19 +49,20 @@ QR="$WORK/qr"
 # The Mac's dialog never answers on its own here: only the phone can decide in time.
 OPPROXY_NO_AUTO_AUTH=1 OPPROXY_NO_MENU_BAR=1 OPPROXY_OP_REQUIREMENT=none OPPROXY_TEST_APPROVER=denied OPPROXY_TEST_DELAY=100 \
     OPPROXY_TEST_AUTO_PAIR=1 OPPROXY_TEST_CLOUD_PAIR="$QR" "$BIN" daemon & DAEMON=$!
-trap 'kill $DAEMON 2>/dev/null; "$BIN" test-cloud-phone reset >/dev/null 2>&1; rm -rf "$WORK"' EXIT
+trap 'kill $DAEMON 2>/dev/null; PHONE reset >/dev/null 2>&1; rm -rf "$WORK"' EXIT
 for _ in $(seq 100); do [ -s "$QR" ] && break; sleep 0.1; done
 check "pairing code written" test -s "$QR"
 
-"$BIN" test-cloud-phone reset >/dev/null
-out=$("$BIN" test-cloud-phone pair "$(cat "$QR")" 2>&1)
+PHONE reset >/dev/null
+out=$(PHONE pair "$(cat "$QR")" 2>&1)
 echo "$out" | sed 's/^/     /'
 check "phone paired over CloudKit" grep -q '"ok":true' <<<"$out"
-check "mac linked the zone" grep -q "cloud feed: linked own zone feed-test-phone-zone" "$LOG"
-check "same Apple ID: the zone isn't shared at all" grep -q "no share" <<<"$("$BIN" test-cloud-phone share)"
+check "phone received the pairing key" grep -q "pairing key received" <<<"$out"
+check "mac linked the zone" grep -q "relay feed: linked own zone pair-" "$LOG"
+check "same Apple ID: the zone isn't shared at all" grep -q "no share" <<<"$(PHONE share)"
 
 agent "$OP" read op://v/cloud/password > "$WORK/read.out" 2>&1 & READ=$!
-out=$("$BIN" test-cloud-phone approve once 2>&1)
+out=$(PHONE approve once 2>&1)
 echo "$out" | sed 's/^/     /'
 check "phone's approval accepted" grep -q '"ok":true' <<<"$out"
 wait $READ

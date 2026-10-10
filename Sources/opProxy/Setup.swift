@@ -71,7 +71,7 @@ enum Setup {
 final class SetupWindow {
     private static var current: NSWindow?
 
-    static func show(paths: Paths, pairing: CloudPairing?) {
+    static func show(paths: Paths, pairing: PhonePairing?) {
         if let window = current {
             window.makeKeyAndOrderFront(nil)
         } else {
@@ -89,7 +89,7 @@ final class SetupWindow {
 
 private struct SetupView: View {
     let paths: Paths
-    let pairing: CloudPairing?
+    let pairing: PhonePairing?
     @State private var realOp: String?
     @State private var shellOp: String?
     @State private var checked = false

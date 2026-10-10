@@ -5,7 +5,7 @@ import OpProxyCore
 
 /// The approval feed on a Unix socket (`Paths.approvalFeed`), for the integration tests'
 /// stand-in phone (`opProxy test-feed-client`): newline-delimited JSON, the full state on
-/// every connection. Test builds only; phones use `CloudTransport`. Client state lives on the
+/// every connection. Test builds only; phones use `RelayTransport`. Client state lives on the
 /// feed's queue.
 final class FeedSocket: FeedTransport {
     private let path: URL
