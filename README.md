@@ -192,7 +192,7 @@ scripts/provision-mac.sh   # optional, once a year, team members only: the provi
 ./install.sh
 ```
 
-`install.sh` builds the release binaries, wraps opProxy in `bin/opProxy.app`, signs it with `scripts/sign-app.sh` (with the profile when there is one), builds `bin/opProxy iCloud Relay.app` if the profile is there (otherwise put the released relay in Applications to reach an iPhone), and installs and restarts its LaunchAgent (`~/Library/LaunchAgents/com.chriswa.opproxy.plist`), keeping your Open at Login choice. Without the profile, it pins this Mac's Secure Enclave approval key into the build (`Sources/opProxy/ApprovalKeyPin.swift`, per-Mac and untracked).
+`install.sh` builds the release binaries, wraps opProxy in `bin/opProxy.app`, signs it with `scripts/sign-app.sh` (with the profile when there is one), builds `bin/opProxy iCloud Relay.app` if the profile is there (otherwise put the released relay in Applications to reach an iPhone), copies both to `/Applications` when it can write there (on macOS 27, menu bar managers like Ice hide the icons of apps elsewhere; without admin rights it runs from `bin/`), and installs and restarts its LaunchAgent (`~/Library/LaunchAgents/com.chriswa.opproxy.plist`), keeping your Open at Login choice. Without the profile, it pins this Mac's Secure Enclave approval key into the build (`Sources/opProxy/ApprovalKeyPin.swift`, per-Mac and untracked).
 
 Building releases and the iPhone app is in `CLAUDE.md`.
 

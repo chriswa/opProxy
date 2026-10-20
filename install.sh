@@ -36,6 +36,31 @@ ln -sfn opProxy.app/Contents/MacOS/opProxy "$ROOT/bin/opProxy"
 ln -sfn opProxy.app/Contents/MacOS/opProxy "$ROOT/bin/op"
 mkdir -p "$HOME/.opProxy" && chmod 700 "$HOME/.opProxy"
 
+# Run from /Applications when it's writable: on macOS 27 the menu bar can't attribute status
+# items from apps elsewhere, so menu bar managers that hide icons (Ice) hide opProxy's too.
+# Without write access (no admin rights), the daemon runs from bin/ as before.
+install_app() {   # $1 bundle; swaps it in by rename, so a failure leaves the old copy in place
+    local name dest staging old
+    name=$(basename "$1"); dest="/Applications/$name"
+    staging="/Applications/.$name.new.$$"; old="/Applications/.$name.old.$$"
+    ditto "$1" "$staging" || { rm -rf "$staging"; return 1; }
+    if [ -e "$dest" ] && ! mv "$dest" "$old"; then rm -rf "$staging"; return 1; fi
+    if ! mv "$staging" "$dest"; then
+        [ -e "$old" ] && mv "$old" "$dest"
+        rm -rf "$staging"; return 1
+    fi
+    rm -rf "$old" 2>/dev/null || echo "left the previous copy at $old"
+}
+if [ -w /Applications ] && install_app "$APP"; then
+    EXE="/Applications/opProxy.app/Contents/MacOS/opProxy"
+    if [ -d "$RELAY" ] && ! install_app "$RELAY"; then
+        echo "couldn't copy opProxy iCloud Relay to /Applications; opProxy uses the one in Applications, if any"
+    fi
+    echo "installed: /Applications/opProxy.app"
+else
+    echo "couldn't copy opProxy.app to /Applications (needs admin rights): running from $APP, where menu bar managers may hide its icon"
+fi
+
 # Writes the LaunchAgent and (re)starts the daemon, as opening the app does on a Mac without one.
 "$EXE" install-agent
 "$ROOT/bin/opProxy" status
