@@ -82,15 +82,17 @@ final class OpEmulatorTests: XCTestCase {
         XCTAssertEqual(fields.compactMap { $0["purpose"] as? String }, ["NOTES", "USERNAME", "PASSWORD"])
         XCTAssertEqual(fields.last?["totp"] as? String, "654321")
         XCTAssertEqual(fields.last?["reference"] as? String, "op://Engineering/GitHub/one-time password", "an untitled section isn't in the path")
+        XCTAssertNil(fields.last?["section"], "nor shown as a section")
+        XCTAssertNil(item["sections"])
         XCTAssertEqual(item["urls"] as? [NSDictionary], [["label": "website", "primary": true, "href": "https://github.com"]])
     }
 
     func testItemGetHumanHidesConcealedValues() {
         let text = out(read(["item", "get", "GitHub"], Self.login))
         XCTAssertTrue(text.hasPrefix("ID:          login1\nTitle:       GitHub\nVault:       Engineering (v2)\nCreated:     1 day ago\n"), text)
-        XCTAssertTrue(text.contains("Fields:\n  username:    octocat\n  password:    [use 'op item get login1 --reveal' to reveal]\n"), text)
+        XCTAssertTrue(text.contains("Fields:\n  username:             octocat\n  password:             [use 'op item get login1 --reveal' to reveal]\n  one-time password:    [use 'op item get login1 --reveal' to reveal]\n"), text)
         XCTAssertTrue(text.contains("URLs:\n  website:    https://github.com (primary)\n"), text)
-        XCTAssertTrue(out(read(["item", "get", "GitHub", "--reveal"], Self.login)).contains("  password:    hunter2\n"))
+        XCTAssertTrue(out(read(["item", "get", "GitHub", "--reveal"], Self.login)).contains("  password:             hunter2\n"))
     }
 
     func testFields() throws {

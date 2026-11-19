@@ -83,7 +83,8 @@ public enum OpOutput {
         var out = [OpField(id: "notesPlain", type: "STRING", purpose: "NOTES", label: "notesPlain", value: item.notes,
                            section: nil, totp: nil, reference: reference(nil, "notesPlain"), sdk: nil)]
         for field in item.fields {
-            let section = item.section(field.sectionId)
+            // The SDK puts built-in fields (an API credential's, say) in an untitled section; op shows no section.
+            let section = item.section(field.sectionId).flatMap { $0.title.isEmpty ? nil : $0 }
             var purpose: String?
             if section == nil, ["Login", "Password"].contains(item.category) {
                 if field.id == "username", item.category == "Login" { purpose = "USERNAME" }
@@ -107,7 +108,7 @@ public enum OpOutput {
         if !item.updatedAt.isEmpty { out.append(("updated_at", timestamp(item.updatedAt))) }
         if !item.websites.isEmpty { out.append(("urls", urls(item.websites))) }
         let used = Set(item.fields.compactMap(\.sectionId))
-        let sections = item.sections.filter { used.contains($0.id) }
+        let sections = item.sections.filter { used.contains($0.id) && !$0.title.isEmpty }
         if !sections.isEmpty { out.append(("sections", sections.map { ordered([("id", $0.id), ("label", $0.title)]) })) }
         out.append(("fields", fields(of: item, vaultName: vaultName).map { field in
             ordered(concealing && field.concealed ? field.json.filter { $0.0 != "value" && $0.0 != "totp" } : field.json)
@@ -152,7 +153,7 @@ public enum OpOutput {
         for sectionId in seen {
             let inSection = shown.filter { $0.section?.id == sectionId }
             let title = inSection[0].section!.title
-            out += "\n\(title.isEmpty ? "Section" : title):\n" + columns(inSection.map { ["  \($0.label):", value($0)] })
+            out += "\n\(title):\n" + columns(inSection.map { ["  \($0.label):", value($0)] })
         }
         if !item.websites.isEmpty {
             out += "URLs:\n" + columns(item.websites.enumerated().map { i, w in
