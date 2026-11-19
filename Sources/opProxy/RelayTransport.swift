@@ -484,7 +484,7 @@ final class RelayTransport: FeedTransport {
                                    signature: signature, rawPublicKey: deviceKey)
             else { return refuse("This phone's opProxy needs updating to pair with this Mac.") }
             answering = true
-            // The feed confirms the phone on the Mac (Touch ID) and pairs its device key.
+            // The feed confirms the phone on the Mac and pairs its device key.
             t.feed?.receive(message) { [self] response in
                 t.queue.async { [self] in
                     guard response["ok"] as? Bool == true, let keyId = response["keyId"] as? String else {

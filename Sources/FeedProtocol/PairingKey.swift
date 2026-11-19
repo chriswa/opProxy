@@ -90,7 +90,7 @@ public enum SealedField {
 
 /// Getting the pairing secret from the Mac to the phone. The Mac's QR code carries a fresh
 /// X25519 public key; the phone answers with its own, signed by its Secure Enclave key, the
-/// one whose fingerprint you compare before confirming with Touch ID. The Mac seals the
+/// one whose fingerprint you compare before confirming on the Mac. The Mac seals the
 /// secret to the key they agree on, so only that phone can open it, and only after you
 /// confirmed it.
 public enum PairingHandshake {

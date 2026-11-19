@@ -7,14 +7,12 @@ import OpProxyCore
 final class AuthContextPanel: AuthPromptObserver {
     /// Only calls still waiting after this long are assumed to be showing a prompt.
     static let showDelay: TimeInterval = 0.4
-    let expiresIn: TimeInterval
     let log: Log?
     private var panel: NSPanel?
     private var follow: Timer?
     private var generation = 0
 
-    init(expiresIn: TimeInterval, log: Log? = nil) {
-        self.expiresIn = expiresIn
+    init(log: Log? = nil) {
         self.log = log
     }
 
@@ -86,12 +84,9 @@ final class AuthContextPanel: AuthPromptObserver {
             panel.orderOut(nil)
             return
         }
-        let clock = DateFormatter()
-        clock.dateFormat = "h:mm a"
-        let until = clock.string(from: Date().addingTimeInterval(expiresIn))
         let frame = prompt.frame
         let width = max(AuthContextView.width, frame.width + 40)
-        let view = AuthContextView(reason: reason, until: until, width: width, gap: frame.height, promptOwner: prompt.owner)
+        let view = AuthContextView(reason: reason, width: width, gap: frame.height, promptOwner: prompt.owner)
         panel.contentView = view
         let size = view.fittingSize
         // The gap in the view lines up exactly with the prompt's window.
@@ -106,8 +101,8 @@ final class AuthContextPanel: AuthPromptObserver {
         let frame: NSRect
     }
 
-    /// The windows worth framing, by owning process, as observed: 1Password's CLI
-    /// authorization prompt, and macOS's privacy consent dialog ("would like to access data
+    /// The windows worth framing, by owning process, as observed: 1Password's authorization
+    /// prompt, and macOS's privacy consent dialog ("would like to access data
     /// from other apps") that can precede it. Nothing else is ever wrapped.
     static let promptOwners: Set<String> = ["1Password", "UserNotificationCenter"]
 
@@ -171,7 +166,7 @@ final class AuthContextView: NSView {
     private(set) var heightBelowGap: CGFloat = 0
     private let below = NSStackView()
 
-    init(reason: AuthReason, until: String, width: CGFloat = AuthContextView.width, gap: CGFloat = 0,
+    init(reason: AuthReason, width: CGFloat = AuthContextView.width, gap: CGFloat = 0,
          promptOwner: String? = nil, theme: SetupTheme = .teal, placeholder: Bool = false) {
         self.theme = theme
         super.init(frame: .zero)
@@ -202,10 +197,10 @@ final class AuthContextView: NSView {
         above.spacing = 3
         above.edgeInsets = NSEdgeInsets(top: 12, left: 20, bottom: 12, right: 20)
 
-        let body = text("opProxy needs its own 1Password CLI session so the requests you approve in its dialogs "
+        let body = text("opProxy needs its own 1Password session so the requests you approve in its dialogs "
                         + "can run without further 1Password prompts.", size: 12, color: theme.secondary)
         let why = text("Why now: " + reason.rawValue, size: 12, weight: .semibold)
-        let expiry = text("Lasts until about \(until) (1Password's 12-hour limit).", size: 12, color: theme.secondary)
+        let expiry = text("Lasts until 1Password locks, quits or updates.", size: 12, color: theme.secondary)
         [body, why, expiry].forEach(below.addArrangedSubview)
         below.orientation = .vertical
         below.alignment = .leading

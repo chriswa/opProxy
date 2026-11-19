@@ -4,19 +4,40 @@ import Foundation
 public enum Routing: Equatable {
     /// Exec the real `op` unchanged: 1Password handles it (and prompts) exactly as before.
     case passthrough(reason: String)
-    /// Run through the daemon's long-lived authorized session.
+    /// Answered by the daemon, through its authorized 1Password session.
     case proxy(ProxyPlan)
 }
 
 public struct ProxyPlan: Equatable {
-    /// Set for commands that can return secret values, which need the user's approval: the
-    /// one item they read. Nil for metadata.
-    public let item: ItemRequest?
+    public enum Kind: Equatable {
+        /// Can return secret values, which need the user's approval: the one item it reads.
+        case read(ItemRequest)
+        /// Returns no secrets, so runs without asking.
+        case metadata(MetadataRequest)
+        /// Changes an item: the user's approval, every time.
+        case write(ItemWrite)
+    }
+
+    public let kind: Kind
     /// The caller's argv without `--out-file` and its companions: the daemon's cwd is not the
-    /// caller's, so the shim writes the file. For an item request the daemon runs this with
-    /// the item pinned to its IDs.
+    /// caller's, so the shim writes the file.
     public let daemonArgv: [String]
     public let outFile: OutFile?
+
+    public var item: ItemRequest? {
+        if case .read(let item) = kind { return item }
+        return nil
+    }
+
+    public var write: ItemWrite? {
+        if case .write(let write) = kind { return write }
+        return nil
+    }
+
+    public var metadata: MetadataRequest? {
+        if case .metadata(let request) = kind { return request }
+        return nil
+    }
 }
 
 /// `--out-file` handling that `op read` / `op document get` would otherwise do itself.
@@ -37,7 +58,8 @@ public struct OpCommand: Equatable {
     static let valueFlags: Set<String> = [
         "--account", "--cache-dir", "--config", "--encoding", "--format", "--session",
         "--vault", "--fields", "--categories", "--tags", "--out-file", "-o", "--file-mode",
-        "--include-categories", "--exclude-categories", "--attribute",
+        "--include-categories", "--exclude-categories", "--attribute", "--category", "--title", "--url",
+        "--template",
     ]
 
     /// Subcommand groups whose second word is also part of the command path.
@@ -82,8 +104,8 @@ public struct OpCommand: Equatable {
 
     public var routing: Routing {
         let path = subcommand.joined(separator: " ")
-        guard let readsSecrets = Self.proxiedCommands[path] else {
-            return .passthrough(reason: "`op \(path)` is not a read-only command opProxy handles")
+        guard let kind = Self.proxiedCommands[path] else {
+            return .passthrough(reason: "`op \(path)` is not a command opProxy handles")
         }
         // The daemon has no stdin and a different cwd and config.
         if positionals.contains("-") { return .passthrough(reason: "reads items from stdin") }
@@ -101,11 +123,25 @@ public struct OpCommand: Equatable {
             daemonArgv = Self.removingFileFlags(argv)
             outFile = OutFile(path: outPath, mode: mode, force: force)
         }
-        guard readsSecrets else { return .proxy(ProxyPlan(item: nil, daemonArgv: daemonArgv, outFile: outFile)) }
-        switch ItemRequest.parse(daemonArgv) {
-        case .success(let item): return .proxy(ProxyPlan(item: item, daemonArgv: daemonArgv, outFile: outFile))
-        case .failure(let unsupported): return .passthrough(reason: unsupported.reason)
+        let planned: ProxyPlan.Kind
+        switch kind {
+        case .read:
+            switch ItemRequest.parse(daemonArgv) {
+            case .success(let item): planned = .read(item)
+            case .failure(let unsupported): return .passthrough(reason: unsupported.reason)
+            }
+        case .metadata:
+            switch MetadataRequest.parse(path: path, flags: flags, positionals: positionals) {
+            case .success(let request): planned = .metadata(request)
+            case .failure(let unsupported): return .passthrough(reason: unsupported.reason)
+            }
+        case .write:
+            switch ItemWrite.parse(daemonArgv) {
+            case .success(let write): planned = .write(write)
+            case .failure(let unsupported): return .passthrough(reason: unsupported.reason)
+            }
         }
+        return .proxy(ProxyPlan(kind: planned, daemonArgv: daemonArgv, outFile: outFile))
     }
 
     static func removingFileFlags(_ argv: [String]) -> [String] {
@@ -124,22 +160,53 @@ public struct OpCommand: Equatable {
         return out
     }
 
-    /// Read-only commands the daemon runs, and whether each can return secret values, which
-    /// need the user's approval. Listings and account metadata don't.
-    /// Everything else (run, inject, item share, signin, plugin run, writes, …) never runs in
-    /// the daemon's authorized session, so 1Password prompts for it as usual.
-    static let proxiedCommands: [String: Bool] = [
-        "read": true,
-        "item get": true,
-        "document get": true,
-        "item list": false,
-        "document list": false,
-        "vault get": false,
-        "vault list": false,
-        "whoami": false,
-        "account list": false,
-        "account get": false,
+    enum Kind {
+        case read, metadata, write
+    }
+
+    /// The commands the daemon answers itself, through the 1Password SDK. Everything else
+    /// (run, inject, item share, signin, plugin run, account list, other writes, …) goes to
+    /// the real `op`, which asks 1Password as usual.
+    static let proxiedCommands: [String: Kind] = [
+        "read": .read,
+        "item get": .read,
+        "document get": .read,
+        "item list": .metadata,
+        "vault list": .metadata,
+        "vault get": .metadata,
+        "whoami": .metadata,
+        "item create": .write,
+        "item edit": .write,
+        "item delete": .write,
     ]
+}
+
+/// A listing or account question, which returns no secrets.
+public struct MetadataRequest: Equatable {
+    public let path: String
+    /// `vault get`'s vault.
+    public let target: String?
+    public let account: String?
+    let flags: [String: String]
+
+    static let commandFlags: [String: Set<String>] = [
+        "item list": ["--vault", "--categories", "--tags", "--include-archive"],
+        "vault list": [],
+        "vault get": [],
+        "whoami": [],
+    ]
+
+    static func parse(path: String, flags: [String: String], positionals: [String]) -> Result<MetadataRequest, ItemRequest.Unsupported> {
+        let allowed = commandFlags[path] ?? []
+        if let other = flags.keys.sorted().first(where: { !allowed.contains($0) && !ItemRequest.globalFlags.contains($0) }) {
+            return .failure(.init(reason: "uses \(other)"))
+        }
+        let wanted = path == "vault get" ? 1 : 0
+        guard positionals.count == wanted, positionals.first?.isEmpty != true else {
+            return .failure(.init(reason: "names \(positionals.count) things"))
+        }
+        return .success(MetadataRequest(path: path, target: positionals.first, account: flags["--account"], flags: flags))
+    }
 }
 
 /// `op://vault/item[/section]/field[?query]`

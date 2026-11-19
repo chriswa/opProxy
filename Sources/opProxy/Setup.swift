@@ -22,7 +22,7 @@ enum Setup {
         }
     }
 
-    /// The 1Password CLI opProxy runs, if installed.
+    /// The 1Password CLI opProxy passes commands to, if installed.
     static func realOp(_ paths: Paths) -> String? {
         paths.realOpCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
     }
@@ -101,10 +101,11 @@ private struct SetupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("opProxy asks you before an AI agent reads a secret from 1Password.")
+            Text("opProxy asks you before an AI agent reads a secret from 1Password, or changes one.")
                 .font(.headline)
             step(done: true, title: "opProxy runs in the background",
-                 detail: "Its key in the menu bar shows how long 1Password's authorization has left.")
+                 detail: "Its key in the menu bar shows how many hours 1Password has kept it authorized. In the 1Password app, "
+                    + "turn on Settings → Developer → Integrate with 1Password SDKs, which is how opProxy reaches it.")
             step(done: realOp != nil, title: "The 1Password CLI is installed",
                  detail: realOp.map { "Found at \($0). In the 1Password app, turn on Settings → Developer → Integrate with 1Password CLI." }
                     ?? "Install it, then turn on Settings → Developer → Integrate with 1Password CLI in the 1Password app.") {

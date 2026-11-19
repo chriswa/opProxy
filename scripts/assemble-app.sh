@@ -1,5 +1,6 @@
 #!/bin/bash
-# Wraps a built opProxy binary in an app bundle: assemble-app.sh <binary> <path/to/opProxy.app>,
+# Wraps a built opProxy binary in an app bundle, with its 1Password helper in Contents/Helpers:
+# assemble-app.sh <binary> <path/to/opProxy.app> <opproxy-sdk binary>,
 # or the relay: assemble-app.sh <opProxyRelay binary> "<path/to/opProxy iCloud Relay.app>" relay.
 # Its version is the repo's VERSION, which the iPhone app shares.
 # A bundle, not a bare binary: macOS only remembers privacy grants (the "access data from other
@@ -16,6 +17,10 @@ else
 fi
 mkdir -p "$APP/Contents/MacOS"
 install -m 0755 "$BINARY" "$APP/Contents/MacOS/$EXE"
+if [ "$EXE" = opProxy ]; then
+    mkdir -p "$APP/Contents/Helpers"
+    install -m 0755 "${3:?the 1Password helper binary (scripts/build-helper.sh)}" "$APP/Contents/Helpers/opproxy-sdk"
+fi
 cat > "$APP/Contents/Info.plist" <<INFO
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

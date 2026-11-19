@@ -9,8 +9,8 @@ enum Shim {
         let env = ProcessInfo.processInfo.environment
         let paths = Paths(environment: env)
 
-        // Every read goes to the daemon, from agents and terminals alike, so its dialog is
-        // always the one that appears. It decides from the process tree who is asking.
+        // Every read and item write goes to the daemon, from agents and terminals alike, so its
+        // dialog is always the one that appears. It decides from the process tree who is asking.
         guard !paths.isDisabled, !ProxyRequest.bypassesDesktopApp(env),
               case .proxy = OpCommand(argv: args).routing,
               let fd = UnixSocket.connect(path: paths.socket.path)
@@ -33,11 +33,12 @@ enum Shim {
             fail("the opProxy daemon closed the connection without a reply; see \(paths.log.path)")
         }
         if response.passthrough == true { passthrough(paths.realOp, args) }
-        FileHandle.standardError.write(response.stderr)
+        // write(2), not FileHandle: a reader that closed early (`| head`) is EPIPE, not a crash.
+        _ = UnixSocket.writeAll(STDERR_FILENO, response.stderr)
         if response.exitCode == 0, case .proxy(let plan) = plan, let outFile = plan.outFile {
             writeOutFile(outFile, contents: response.stdout)
         }
-        FileHandle.standardOutput.write(response.stdout)
+        _ = UnixSocket.writeAll(STDOUT_FILENO, response.stdout)
         exit(response.exitCode)
     }
 
@@ -64,7 +65,7 @@ enum Shim {
     }
 
     static func fail(_ message: String) -> Never {
-        FileHandle.standardError.write(Data("[ERROR] opProxy: \(message)\n".utf8))
+        _ = UnixSocket.writeAll(STDERR_FILENO, Data("[ERROR] opProxy: \(message)\n".utf8))
         exit(1)
     }
 }

@@ -555,7 +555,7 @@ final class FeedModel: ObservableObject {
             guard joined() else { return "The Mac didn't join. Is its pairing window still open?" }
 
             // Sent even when already paired: the Mac answers at once, and its window closes.
-            progress("Confirm on the Mac: check it shows the fingerprint below, then use Touch ID.")
+            progress("Confirm on the Mac: check it shows the fingerprint below, then click Pair.")
             var message = FeedReply.pair(publicKey: PhoneKey.publicKey, name: UIDevice.current.name)
             if let handshake {
                 let mine = handshake.phoneKey.publicKey.rawRepresentation

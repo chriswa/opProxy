@@ -86,28 +86,3 @@ public struct DaemonStatus: Codable {
         self.error = error
     }
 }
-
-/// Daemon → session holder, one JSON line per `op` run.
-public struct HolderRequest: Codable {
-    public let id: Int
-    public let argv: [String]
-    public let env: [String: String]
-    public let timeout: TimeInterval
-
-    public init(id: Int, argv: [String], env: [String: String], timeout: TimeInterval) {
-        self.id = id
-        self.argv = argv
-        self.env = env
-        self.timeout = timeout
-    }
-}
-
-public struct HolderReply: Codable {
-    public let id: Int
-    public let response: ProxyResponse
-
-    public init(id: Int, response: ProxyResponse) {
-        self.id = id
-        self.response = response
-    }
-}

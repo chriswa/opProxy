@@ -34,7 +34,7 @@ struct PairingView: View {
             case .guide: scanning = true
             case .confirm:
                 busy = true
-                progress = "Confirm on the Mac: check it shows the fingerprint below, then use Touch ID."
+                progress = "Confirm on the Mac: check it shows the fingerprint below, then click Pair."
             default: break
             }
         }

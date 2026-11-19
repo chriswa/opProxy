@@ -1,9 +1,9 @@
 import AppKit
 import CoreGraphics
 
-/// Context for why a 1Password CLI authorization ended. 1Password ends every CLI
-/// authorization when the app locks, and the app locks on its own: after its idle timeout
-/// (no keyboard or mouse input, regardless of CLI activity), on sleep, and on screen lock.
+/// Context for why opProxy's 1Password authorization ended. 1Password ends it when the app
+/// locks, and the app locks on its own, depending on its settings: after its idle timeout (no
+/// keyboard or mouse input, regardless of opProxy's activity), on sleep, and on screen lock.
 enum LockDiagnostics {
     /// 1Password's own log. Its lock lines read like
     /// `INFO  2026-10-02T16:02:53.149+00:00 ThreadId(10) [...lock.rs:282] Locked. Reason: Automatic(Idle(600)).`

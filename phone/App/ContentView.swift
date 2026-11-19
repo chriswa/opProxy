@@ -147,8 +147,11 @@ private struct MacRow: View {
 
     private static func status(_ mac: MacFeed, now: Date) -> String {
         guard let status = mac.status else { return "Paired" }
-        if status.ok, let until = status.untilDate { return "Secret manager authorized · \(Duration.short(until.timeIntervalSince(now))) left" }
-        return status.ok ? "Secret manager authorized" : "Secret manager not authorized on this Mac"
+        guard status.ok else { return "Secret manager not authorized on this Mac" }
+        // Older Macs had a 12-hour authorization and say when it ends.
+        if let until = status.untilDate { return "Secret manager authorized · \(Duration.short(until.timeIntervalSince(now))) left" }
+        let since = Date(timeIntervalSince1970: status.since / 1000)
+        return "Secret manager authorized · \(Duration.hours(now.timeIntervalSince(since)))"
     }
 }
 

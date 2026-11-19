@@ -7,7 +7,7 @@ public struct PairedDevice: Codable, Equatable {
     /// Raw 64-byte P-256 public key (X‖Y).
     public let publicKey: Data
     public let pairedAt: Date
-    /// Over `signedPayload`, made with the Touch ID-gated approval key when it was paired.
+    /// Over `signedPayload`, made with the approval key when it was paired.
     public let signature: Data?
 
     public var fingerprint: String { DeviceKey.fingerprint(keyId: keyId) }

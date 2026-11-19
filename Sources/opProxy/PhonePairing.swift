@@ -3,7 +3,7 @@ import CoreImage
 import OpProxyCore
 
 /// Pairs an iPhone through opProxy iCloud Relay (RelayTransport): shows the QR code, then how
-/// it went. The phone's `pair` message is confirmed with Touch ID like any other.
+/// it went. The phone's `pair` message is confirmed on the Mac like any other.
 final class PhonePairing {
     private let transport: RelayTransport
     private var window: QRWindow?

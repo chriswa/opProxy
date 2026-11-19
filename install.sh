@@ -17,9 +17,10 @@ if ! grep -qF "\"$PUB\"" "$PIN_FILE"; then
         "let pinnedApprovalPublicKey: String? = \"$PUB\"" > "$PIN_FILE"
     swift build -c release --package-path "$ROOT"
 fi
+"$ROOT/scripts/build-helper.sh" "$ROOT/.build/release/opproxy-sdk"
 APP="$ROOT/bin/opProxy.app"
 EXE="$APP/Contents/MacOS/opProxy"
-"$ROOT/scripts/assemble-app.sh" "$ROOT/.build/release/opProxy" "$APP"
+"$ROOT/scripts/assemble-app.sh" "$ROOT/.build/release/opProxy" "$APP" "$ROOT/.build/release/opproxy-sdk"
 "$ROOT/scripts/sign-app.sh" "$APP"
 # opProxy iCloud Relay, beside the app, only if it can be signed for CloudKit (a profile from
 # provision-mac.sh): otherwise opProxy uses one from Applications, downloaded from the releases.

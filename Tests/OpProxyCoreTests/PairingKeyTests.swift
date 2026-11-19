@@ -98,70 +98,60 @@ final class PairingKeyTests: XCTestCase {
 
     // MARK: 1Password storage
 
-    final class FakeOp {
-        var calls: [[String]] = []
-        var reply = ProxyResponse(exitCode: 0, stdout: Data(), stderr: Data())
-        func run(_ argv: [String]) -> ProxyResponse {
-            calls.append(argv)
-            return reply
-        }
-    }
-
     static let generated = "Q7ux2Lk9fP3mZr8VbN4tWc6YhJ1sDa5Ge0KiXo2Rq9Tn3Mv7Lp4Bz8Hd6Fy1Cw5S"
+    static let vaults = [SDK.VaultOverview(id: "shared", title: "Engineering", vaultType: "userCreated"),
+                         SDK.VaultOverview(id: "mine", title: "Employee", vaultType: "personal")]
 
     func item(title: String = "opProxy pairing key: iPhone · Studio", tags: [String] = ["opproxy-pairing"],
-              category: String = "PASSWORD", password: String = generated) -> Data {
-        let json: [String: Any] = [
-            "id": "abc123", "title": title, "category": category, "tags": tags,
-            "fields": [["id": "password", "type": "CONCEALED", "purpose": "PASSWORD", "label": "password", "value": password]],
-        ]
-        return try! JSONSerialization.data(withJSONObject: json)
+              category: String = "Password", password: String = generated) -> SDK.Item {
+        SDK.Item(id: "abc123", title: title, category: category, vaultId: "mine",
+                 fields: [SDK.Field(id: "password", title: "password", fieldType: "Concealed", value: password)], tags: tags)
+    }
+
+    func vault(_ op: FakeOnePassword) -> PairingKeyVault {
+        PairingKeyVault { _ in .success(op) }
     }
 
     func testCreateLets1PasswordGenerateTheSecret() throws {
-        let op = FakeOp()
-        op.reply = ProxyResponse(exitCode: 0, stdout: item(), stderr: Data())
-        let made = try PairingKeyVault(run: op.run).create(phoneName: "iPhone", macName: "Studio")
-        XCTAssertEqual(made.itemId, "abc123")
-        XCTAssertEqual(made.secret, Data(Self.generated.utf8))
-        let argv = try XCTUnwrap(op.calls.first)
-        XCTAssertEqual(argv.prefix(2), ["item", "create"])
-        XCTAssertTrue(argv.contains("--generate-password=letters,digits,64"))
-        XCTAssertTrue(argv.contains("opProxy pairing key: iPhone · Studio"))
-        XCTAssertFalse(argv.contains { $0.contains(Self.generated) }, "the secret must never be on a command line")
+        let op = FakeOnePassword(vaults: Self.vaults)
+        let made = try vault(op).create(phoneName: "iPhone", macName: "Studio")
+        let item = try XCTUnwrap(op.stored.first)
+        XCTAssertEqual(made.itemId, item.id)
+        XCTAssertEqual(item.vaultId, "mine", "in the account's own vault")
+        XCTAssertEqual(item.title, "opProxy pairing key: iPhone · Studio")
+        XCTAssertEqual(item.tags, ["opproxy-pairing"])
+        let secret = String(decoding: made.secret, as: UTF8.self)
+        XCTAssertEqual(secret, item.fields.first?.value)
+        XCTAssertEqual(secret.count, 64)
+        XCTAssertTrue(secret.allSatisfy { $0.isLetter || $0.isNumber })
     }
 
     func testLoadChecksTheItemIsAPairingKey() throws {
-        let op = FakeOp()
-        let vault = PairingKeyVault(run: op.run)
-        op.reply = ProxyResponse(exitCode: 0, stdout: item(), stderr: Data())
-        let key = try vault.load(itemId: "abc123")
+        let op = FakeOnePassword(vaults: Self.vaults, items: [item()])
+        let key = try vault(op).load(itemId: "abc123")
         XCTAssertEqual(key.id, PairingKey(secret: Data(Self.generated.utf8)).id)
-        XCTAssertEqual(op.calls.last, ["item", "get", "abc123", "--format", "json", "--reveal"])
 
-        for wrong in [item(title: "GitHub token"), item(tags: []), item(category: "LOGIN"), item(password: "short")] {
-            op.reply = ProxyResponse(exitCode: 0, stdout: wrong, stderr: Data())
-            XCTAssertThrowsError(try vault.load(itemId: "abc123"))
+        for wrong in [item(title: "GitHub token"), item(tags: []), item(category: "Login"), item(password: "short")] {
+            op.stored = [wrong]
+            XCTAssertThrowsError(try vault(op).load(itemId: "abc123"))
         }
     }
 
-    func testLoadReportsOpsError() {
-        let op = FakeOp()
-        op.reply = ProxyResponse(exitCode: 1, stdout: Data(), stderr: Data("[ERROR] not signed in".utf8))
-        XCTAssertThrowsError(try PairingKeyVault(run: op.run).load(itemId: "abc123")) {
-            XCTAssertEqual(($0 as? PairingKeyVault.Failure)?.description, "could not read the pairing key: [ERROR] not signed in")
+    func testLoadReports1PasswordsError() {
+        let op = FakeOnePassword(vaults: Self.vaults, items: [item()])
+        op.failure = SDK.Failure(.unauthorized, "invalid client id")
+        XCTAssertThrowsError(try vault(op).load(itemId: "abc123")) {
+            XCTAssertEqual(($0 as? PairingKeyVault.Failure)?.description, "could not read the pairing key: invalid client id")
         }
     }
 
     func testDeleteToleratesAnItemAlreadyGone() throws {
-        let op = FakeOp()
-        let vault = PairingKeyVault(run: op.run)
-        try vault.delete(itemId: "abc123")
-        XCTAssertEqual(op.calls.last, ["item", "delete", "abc123"])
-        op.reply = ProxyResponse(exitCode: 1, stdout: Data(), stderr: Data(#"[ERROR] "abc123" isn't an item."#.utf8))
-        XCTAssertNoThrow(try vault.delete(itemId: "abc123"))
-        op.reply = ProxyResponse(exitCode: 1, stdout: Data(), stderr: Data("[ERROR] not signed in".utf8))
-        XCTAssertThrowsError(try vault.delete(itemId: "abc123"))
+        let op = FakeOnePassword(vaults: Self.vaults, items: [item()])
+        try vault(op).delete(itemId: "abc123")
+        XCTAssertTrue(op.stored.isEmpty)
+        XCTAssertNoThrow(try vault(op).delete(itemId: "abc123"))
+        op.failure = SDK.Failure(.unauthorized, "invalid client id")
+        XCTAssertThrowsError(try vault(op).delete(itemId: "abc123"))
     }
 
     func testPairingKeysAreRecognizedByTitle() {

@@ -96,10 +96,10 @@ private struct MenuMock: View {
         HStack(spacing: 14) {
             Image(systemName: "wifi")
             Image(systemName: "battery.75percent")
-            // The key, as opProxy draws it, with the time its authorization has left.
+            // The key, as opProxy draws it, with how many hours its authorization has held.
             HStack(spacing: 3) {
                 Image(systemName: "key.horizontal.fill")
-                Text("12h").font(.system(size: 12, weight: .semibold))
+                Text("3h").font(.system(size: 12, weight: .semibold))
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)

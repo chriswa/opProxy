@@ -114,7 +114,7 @@ final class ApprovalFeed {
             }
         }
         // `opProxy unpair` edits the file from another process; tell consumers when keys change.
-        // The authorization is polled here too, which also catches it passing the 12-hour cap.
+        // The authorization is polled here too.
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 5, repeating: 5)
         timer.setEventHandler { [weak self] in
@@ -159,7 +159,7 @@ final class ApprovalFeed {
     func publish(_ prompt: ApprovalPrompt, decide: @escaping Decide) -> String {
         let id = Self.random(16)
         queue.async { [self] in
-            let (options, defaultIndex) = ApprovalOptions.for(prompt.requester)
+            let (options, defaultIndex) = ApprovalOptions.for(prompt.requester, write: prompt.isWrite)
             // Each lasting option's grant is the exact approval it would store, fixed now so
             // the phone's signature can commit to it.
             let approvedAt = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
@@ -320,8 +320,8 @@ final class ApprovalFeed {
         guard let authStatus else { return }
         let (window, prompting) = authStatus()
         let now = Date()
-        if status?.ok == true, window.remaining(at: now) == nil { lostSince = now }
-        let next = FeedStatus(window, prompting: prompting, lostSince: lostSince, now: now)
+        if status?.ok == true, !window.signedIn { lostSince = now }
+        let next = FeedStatus(window, prompting: prompting, lostSince: lostSince)
         guard next != status else { return }
         status = next
         broadcast(.status(next.json))

@@ -1,7 +1,7 @@
 #!/bin/bash
 # End-to-end test of the daemon's side of opProxy iCloud Relay, offline: the debug relay with
 # OPPROXY_TEST_FAKE_CLOUD stands in for CloudKit and a phone (Sources/opProxyRelay/FakeCloud.swift),
-# and a stub `op` keeps pairing keys as files. Covers pairing with the key handshake, sealed
+# and the fake 1Password helper keeps pairing keys in its fixture. Covers pairing with the key handshake, sealed
 # records, a phone approval, reading the key back after a restart, refusing to hand the key
 # out, and unpairing. Needs a debug build (swift build).
 set -uo pipefail
@@ -28,48 +28,22 @@ FAKE="$WORK/fake-agent"
 printf '%s\n' 'export CLAUDE_CODE_SESSION_ID=$2' 'shift 2' '/bin/bash -c '"'"'"$@"'"'"' tool-shell "$@"' > "$FAKE"
 agent() { (exec -a opproxy-fake-agent /bin/bash "$FAKE" sess-R sess-R "$@"); }
 
-# A stub op: always authorized; items are the catalog below plus the pairing keys it makes,
-# kept as JSON files in $WORK/items.
-cat > "$OPPROXY_REAL_OP" <<STUB
+# 1Password's stand-in (the fake helper): a vault with one plain item, and the account's own
+# vault, where the pairing keys it makes are kept. The stub op only lists the account.
+export OPPROXY_TEST_SDK="$WORK/items/fixture.json"
+cat > "$OPPROXY_TEST_SDK" <<'FIXTURE'
+{"vaults": [{"id": "v", "title": "v", "vaultType": "userCreated"}, {"id": "pv", "title": "Personal", "vaultType": "personal"}],
+ "items": [{"id": "plain", "title": "plain", "category": "Login", "vaultId": "v", "version": 1,
+            "createdAt": "2026-11-01T00:00:00Z", "updatedAt": "2026-11-01T00:00:00Z",
+            "fields": [{"id": "password", "title": "password", "fieldType": "Concealed", "value": "v:plain:password"}]}]}
+FIXTURE
+cat > "$OPPROXY_REAL_OP" <<'STUB'
 #!/bin/bash
-ITEMS="$WORK/items"
-echo "\$*" >> "$WORK/op-calls"
-case "\$1 \$2" in
-  "item create")
-    python3 - "\$ITEMS" "\$@" <<'PY'
-import json, os, secrets, sys
-items, args = sys.argv[1], sys.argv[2:]
-title = args[args.index("--title") + 1]
-tags = args[args.index("--tags") + 1].split(",")
-item_id = "pk" + secrets.token_hex(8)
-item = {"id": item_id, "title": title, "category": "PASSWORD", "tags": tags,
-        "vault": {"id": "pv", "name": "Personal"},
-        "fields": [{"id": "password", "type": "CONCEALED", "purpose": "PASSWORD", "value": secrets.token_hex(32)}]}
-json.dump(item, open(os.path.join(items, item_id), "w"))
-print(json.dumps(item))
-PY
-    exit 0 ;;
-  "item get")
-    [ -f "\$ITEMS/\$3" ] && { cat "\$ITEMS/\$3"; exit 0; }
-    echo "[ERROR] \"\$3\" isn't an item." >&2; exit 1 ;;
-  "item delete")
-    [ -f "\$ITEMS/\$3" ] && { rm "\$ITEMS/\$3"; exit 0; }
-    echo "[ERROR] \"\$3\" isn't an item." >&2; exit 1 ;;
-  "item list")
-    python3 - "\$ITEMS" <<'PY'
-import json, os, sys
-items = [{"id": "plain", "title": "plain", "vault": {"id": "v", "name": "v"}}]
-for name in os.listdir(sys.argv[1]):
-    item = json.load(open(os.path.join(sys.argv[1], name)))
-    items.append({"id": item["id"], "title": item["title"], "vault": item["vault"]})
-print(json.dumps(items))
-PY
-    exit 0 ;;
-esac
-case "\$1" in whoami) exit 0 ;; esac
-echo "stub ran: \$*"
+[ "$*" = "account list --format json" ] && { echo '[{"url": "stub.1password.com", "email": "me@stub.com", "user_uuid": "U", "account_uuid": "A"}]'; exit 0; }
+echo "stub ran: $*"
 STUB
 chmod +x "$OPPROXY_REAL_OP"
+keys() { python3 -c "import json,sys; print(' '.join(i['id'] for i in json.load(open(sys.argv[1]))['items'] if i['title'].startswith('opProxy pairing key')))" "$OPPROXY_TEST_SDK"; }
 
 PASS=0; FAIL=0
 check() { local name=$1; shift; if "$@"; then PASS=$((PASS+1)); echo "ok   $name"; else FAIL=$((FAIL+1)); echo "FAIL $name"; fi; }
@@ -88,22 +62,29 @@ start_daemon OPPROXY_TEST_CLOUD_PAIR="$CLOUD/qr"
 check "v4 pairing code written" wait_for 'grep -q "^opproxy-pair:4:" "$CLOUD/qr" 2>/dev/null'
 check "pair-result carries a key the phone opened" wait_for 'grep -q "KEY OK" "$CLOUD/paired" 2>/dev/null'
 check "pair-result ok" grep -q '"ok":true' "$CLOUD/paired"
-check "the key was made in 1Password by generating it" grep -q -- "--generate-password" "$WORK/op-calls"
-ITEM=$(ls "$WORK/items" | head -1)
+ITEM=$(keys)
+check "the key was made in 1Password by generating it" python3 -c "
+import json, sys
+[key] = [i for i in json.load(open(sys.argv[1]))['items'] if i['id'] == sys.argv[2]]
+value = key['fields'][0]['value']
+assert key['vaultId'] == 'pv' and key['tags'] == ['opproxy-pairing'] and len(value) == 64 and value.isalnum(), key" "$OPPROXY_TEST_SDK" "$ITEM"
 check "the link names the key's item" grep -q "\"keyItem\" : \"$ITEM\"" "$OPPROXY_HOME/relay-links.json"
 check "the phone read the sealed hello" wait_for 'grep -q "\"type\":\"hello\"" "$CLOUD/hello" 2>/dev/null'
 
 # --- a request reaches the phone sealed, and the phone's sealed answer runs it
 echo "approve once" > "$CLOUD/answer"
 out=$(agent "$OP" read op://v/plain/password 2>&1)
-check "phone's approval ran the read" grep -q "stub ran: read" <<<"$out"
+check "phone's approval ran the read" [ "$out" = "v:plain:password" ]
 check "the phone heard the reply-result" grep -q '"ok":true' "$CLOUD/replies"
 check "nothing went to the relay in the clear" bash -c "! grep -q challenge '$CLOUD/commands'"
 
 # --- the pairing key is never handed out, to an agent or anyone
 out=$(agent "$OP" read "op://Personal/$ITEM/password" 2>&1)
 check "pairing key refused" grep -q "opProxy's own pairing key" <<<"$out"
-check "pairing key never read for a caller" bash -c "! grep -q 'read op://Personal/$ITEM' '$WORK/op-calls'"
+SECRET=$(python3 -c "import json,sys; print([i for i in json.load(open(sys.argv[1]))['items'] if i['id'] == sys.argv[2]][0]['fields'][0]['value'])" "$OPPROXY_TEST_SDK" "$ITEM")
+check "pairing key never read for a caller" bash -c '! grep -q "$1" <<<"$2"' _ "$SECRET" "$out"
+out=$(agent "$OP" item edit "$ITEM" "password=planted" 2>&1)
+check "pairing key never changed for a caller" grep -q "opProxy's own pairing key" <<<"$out"
 
 # --- after a restart the daemon reads the key back from 1Password and serves the phone again
 # (Left by a version before 0.3.0: its phones are told to pair again, once.)
@@ -118,7 +99,7 @@ check "the phone reads the resealed hello" wait_for 'grep -q "\"type\":\"hello\"
 
 # --- unpairing drops the zone and deletes the key from 1Password
 "$BIN" unpair --all >/dev/null
-check "unpair deletes the pairing key" wait_for '[ -z "$(ls "$WORK/items")" ]'
+check "unpair deletes the pairing key" wait_for '[ -z "$(keys)" ]'
 check "unpair unlinks the zone" wait_for 'grep -q "\"unlink\"" "$CLOUD/commands"'
 check "the relay stops when no phone is left" wait_for 'grep -q "stopping the relay" "$LOG"'
 

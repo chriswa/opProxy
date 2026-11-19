@@ -5,7 +5,8 @@
 # instead, and a relay can't reach CloudKit. Both apps share one bundle ID and profile, but
 # the relay gets only the iCloud entitlements, never the approval key's keychain group.
 # release.sh passes a Developer ID profile and its entitlements in OPPROXY_PROFILE and
-# OPPROXY_ENTITLEMENTS.
+# OPPROXY_ENTITLEMENTS. opProxy's 1Password helper (Contents/Helpers/opproxy-sdk) is signed
+# first, with the same identity and only its own entitlement (helper/opproxy-sdk.entitlements).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 APP=$1
@@ -19,6 +20,13 @@ if [ -x "$APP/Contents/MacOS/opProxyRelay" ]; then
     ENTITLEMENTS=$RELAY_ENTITLEMENTS
 fi
 IDENTITIES=$(security find-identity -v -p codesigning 2>/dev/null)
+HELPER="$APP/Contents/Helpers/opproxy-sdk"
+sign_helper() { # identity ("-" for ad-hoc), then codesign's timestamp flag
+    [ -f "$HELPER" ] || return 0
+    local runtime=(--options runtime --entitlements "$ROOT/helper/opproxy-sdk.entitlements")
+    [ "$1" = - ] && runtime=()
+    codesign --force --sign "$1" --identifier com.chriswa.opproxy.sdk-helper "${runtime[@]}" $2 "$HELPER"
+}
 if [ -f "$PROFILE" ]; then
     # The profile names the certificates it allows; sign with the first one in the keychain.
     IDENTITY=$(security cms -D -i "$PROFILE" | python3 -c '
@@ -32,6 +40,7 @@ for der in plistlib.loads(sys.stdin.buffer.read())["DeveloperCertificates"]:
         cp "$PROFILE" "$APP/Contents/embedded.provisionprofile"
         # Developer ID builds get a secure timestamp, which notarization requires.
         TIMESTAMP=$(grep "$IDENTITY" <<<"$IDENTITIES" | grep -q "Developer ID" && echo --timestamp || echo --timestamp=none)
+        sign_helper "$IDENTITY" "$TIMESTAMP"
         codesign --force --sign "$IDENTITY" --options runtime $TIMESTAMP --entitlements "$ENTITLEMENTS" "$APP"
         exit 0
     fi
@@ -42,8 +51,10 @@ rm -f "$APP/Contents/embedded.provisionprofile"
 IDENTITY=$(awk -F'"' '/Developer ID Application|Apple Development/{print $2; exit}' <<<"$IDENTITIES")
 if [ -n "$IDENTITY" ]; then
     echo "signing as: $IDENTITY"
+    sign_helper "$IDENTITY" --timestamp=none
     codesign --force --sign "$IDENTITY" --options runtime "$APP"
 else
     echo "signing ad-hoc (no identity found — macOS will re-prompt after every rebuild)"
+    sign_helper - ""
     codesign --force --sign - "$APP"
 fi

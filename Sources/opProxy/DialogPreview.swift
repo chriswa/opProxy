@@ -60,7 +60,7 @@ enum DialogPreview {
         var shots: [(String, URL)] = []
         for theme in SetupTheme.options {
             let url = dir.appendingPathComponent("setup-\(theme.name).png")
-            capture(AuthContextView(reason: .startup, until: "4:23 AM", width: 440, gap: 300, promptOwner: "1Password",
+            capture(AuthContextView(reason: .startup, width: 440, gap: 300, promptOwner: "1Password",
                                     theme: theme, placeholder: true), to: url)
             shots.append((theme.name, url))
         }
@@ -93,9 +93,20 @@ enum DialogPreview {
                           title: "prod-ssh-config", vaultName: "Engineering")),
             ("terminal", ["item", "get", "Issue Tracker API key", "--fields", "label=credential", "--reveal"],
              nil, nil, linear),
+            ("edit", ["item", "edit", "Issue Tracker API key", "credential[password]=trk_live_4f9a2c7e81d3", "--tags", "rotated"],
+             #"op item edit "Issue Tracker API key" 'credential[password]=trk_live_4f9a2c7e81d3' --tags rotated && echo saved"#,
+             "I rotated the tracker key in its dashboard; saving the new one to 1Password so the deploy picks it up.",
+             linear),
         ]
         for (name, argv, tool, message, target) in samples {
-            guard case .success(let item) = ItemRequest.parse(argv) else { fatalError("unparseable sample \(argv)") }
+            let subject: Subject
+            if case .success(let item) = ItemRequest.parse(argv) {
+                subject = .read(item)
+            } else if case .success(let write) = ItemWrite.parse(argv) {
+                subject = .write(write)
+            } else {
+                fatalError("unparseable sample \(argv)")
+            }
             let request = ProxyRequest(session: session, labelEnvironment: nil, argv: argv, env: [:],
                                        cwd: "/Users/me/projects/app")
             let requester: Requester
@@ -108,6 +119,10 @@ enum DialogPreview {
                         "48190  python3 scripts/sync_linear.py --since yesterday",
                         "30112  -zsh"]),
                     label: nil))
+            } else if case .write = subject {
+                key = .write(name)
+                requester = .agent(AgentRequester(session: session, label: label, caller: CallerContext(toolCommand: tool, viaProcess: nil),
+                                                  lastMessage: message, agentPid: 26441))
             } else {
                 key = .agent(ApprovalKey(audience: .session(agent: .claude, sessionId: session.sessionId),
                                          item: ItemRef(account: nil, vaultId: target.vaultId, itemId: target.itemId)))
@@ -116,11 +131,11 @@ enum DialogPreview {
                                                   caller: CallerContext(toolCommand: tool, viaProcess: nil),
                                                   lastMessage: message, agentPid: 26441))
             }
-            let prompt = ApprovalPrompt(key: key, request: request, requester: requester, item: item, target: target,
+            let prompt = ApprovalPrompt(key: key, request: request, requester: requester, subject: subject, target: target,
                                         peerPid: 48213)
             // The panel has one fixed look; render it under both system appearances to prove it.
             for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
-                let view = ApprovalView(prompt: prompt, actions: nil, authContext: nil)
+                let view = ApprovalView(prompt: prompt, actions: nil)
                 if name == "read-by-id" { view.setWaiting(2) }
                 if name == "forever-all" { view.choose(.forever, .allAgents) }
                 view.setRemaining(name == "minimal" ? 14 : 87)

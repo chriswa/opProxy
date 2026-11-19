@@ -1,11 +1,12 @@
 # opProxy: notes for agents
 
-opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in front of agents' 1Password CLI reads. Its iPhone app, also called opProxy, is in `phone/`, which answers the same requests over iCloud. README.md says how both work; APPROVAL_FEED.md is the protocol between them; PROVIDER_ADAPTERS.md is a plan for later.
+opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in front of agents' 1Password reads and item writes, which it answers itself through the 1Password SDK. Its iPhone app, also called opProxy, is in `phone/`, which answers the same requests over iCloud. README.md says how both work; APPROVAL_FEED.md is the protocol between them; PROVIDER_ADAPTERS.md is a plan for later.
 
 ## Layout
 
 - `Sources/FeedProtocol`: shared by the Mac and the phone. Wire types, the CloudKit layout (`CloudFeed`), the pairing key and sealing (`PairingKey.swift`), the relay's commands and the protocol numbers (`Relay.swift`), documents, signed statements, `Duration`.
-- `Sources/OpProxyCore`: the Mac's logic that doesn't need AppKit. `Sources/opProxy`: the Mac app (daemon, dialog, menu, Setup, `RelayTransport`, `PhonePairing`).
+- `Sources/OpProxyCore`: the Mac's logic that doesn't need AppKit, including what `op` would print (`OpEmulator`, `OpOutput`) and item writes (`ItemWrite`). `Sources/opProxy`: the Mac app (daemon, dialog, menu, Setup, `AuthTracker` and `SDKHelper` for the 1Password helper, `RelayTransport`, `PhonePairing`).
+- `helper/`: opProxy's 1Password helper, in Go: one 1Password SDK client, authorized through the 1Password app, that the daemon runs as a child process and talks to over a pipe. It ships in the app as `Contents/Helpers/opproxy-sdk`; `scripts/build-helper.sh` builds it.
 - `Sources/opProxyRelay`: opProxy iCloud Relay, the only part that uses CloudKit. The daemon runs it as a child process while an iPhone is paired or pairing, and seals everything it hands it with the pairing's key.
 - `phone/project.yml`: the iPhone app, its notification extension, and `MacSigning`, a stub Mac app built only so Xcode makes the Mac's provisioning profiles. Generate the Xcode project with `xcodegen generate` in `phone/`; `OpProxyPhone.xcodeproj` is generated and ignored.
 - `phone/schema.ckdb`: the CloudKit schema deployed to Production.
@@ -28,7 +29,7 @@ opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in
 ## What a machine needs
 
 - Xcode signed in to an Apple account on team 7H2524M5TN (Settings → Accounts). Signing, provisioning and uploads use it: the API key's App Manager role can't use Xcode's cloud signing, so exports go through Xcode's account.
-- `brew install xcodegen`; `gh` logged in with write access to `chriswa/opProxy`.
+- `brew install xcodegen go`; `gh` logged in with write access to `chriswa/opProxy`.
 - For releases: the API key file above and the `opProxy` notarytool profile (`xcrun notarytool store-credentials opProxy --key … --key-id DFK3C9K7M4 --issuer bb77b192-…`). To make a new key: App Store Connect → Users and Access → Integrations → Team Keys; it downloads only once.
 - For schema work: a CloudKit management token in the keychain (`xcrun cktool save-token --type management`; the token comes from the CloudKit Console's account Settings → Tokens).
 
@@ -36,8 +37,9 @@ opProxy is a Mac app (Swift package, `Sources/`) that puts an approval dialog in
 
 ```
 swift build && swift test           # Mac, unit tests
-bash Tests/integration.sh           # shim, daemon and feed against a stub op, a fake agent and a stand-in phone
-bash Tests/relay-integration.sh     # the daemon with the relay, offline: a stand-in CloudKit and phone, and pairing keys in a stub op
+(cd helper && go vet ./...)         # the 1Password helper
+bash Tests/integration.sh           # shim, daemon, helper and feed against a fake 1Password, a fake agent and a stand-in phone
+bash Tests/relay-integration.sh     # the daemon with the relay, offline: a stand-in CloudKit and phone, and pairing keys in a fake 1Password
 Tests/cloud-e2e.sh                  # the CloudKit feed against real iCloud (needs the provisioning profile)
 cd phone && xcodegen generate && xcodebuild -project OpProxyPhone.xcodeproj -scheme OpProxyPhone \
     -destination 'generic/platform=iOS' -derivedDataPath build -allowProvisioningUpdates build
@@ -47,7 +49,7 @@ xcrun devicectl device install app --device <id from `xcrun devicectl list devic
 
 The phone must be unlocked and reachable (same Wi-Fi, or a cable) for `devicectl`; a locked phone shows as unavailable. The simulator has no iCloud account, so it can't pair. For screenshots (the README's are in `docs/screenshots`), debug builds open a fixed screen with sample data when launched with `-shot pairing|guide|confirm|request|allowed|macs|demo|demo-request`, e.g. `xcrun simctl launch --terminate-running-process "iPhone 17 Pro" com.chriswa.opproxy.phone -shot request`, after `xcrun simctl status_bar "iPhone 17 Pro" override --time 9:41`.
 
-`phone/try.sh start | pair | request [session] | stop` runs a test daemon beside the installed one (state in `~/.opProxy-try`, its own key icon, a stub `op`) for trying the phone with fake requests. Debug builds honour `OPPROXY_*` test knobs; release builds ignore them, so a release binary's CLI always reads the real `~/.opProxy`.
+`phone/try.sh start | pair | request [session] | stop` runs a test daemon beside the installed one (state in `~/.opProxy-try`, its own key icon, a fake 1Password) for trying the phone with fake requests. Debug builds honour `OPPROXY_*` test knobs; release builds ignore them, so a release binary's CLI always reads the real `~/.opProxy`.
 
 Installing locally (`./install.sh`, after `scripts/provision-mac.sh` once a year) restarts the daemon, so 1Password asks to authorize again; paired phones get nothing until it has, since their pairing keys are read from 1Password.
 
@@ -77,4 +79,6 @@ Production's schema is permanent: record types and fields can be added but never
 - The approval key lives in the keychain access group `7H2524M5TN.com.chriswa.opproxy` for profile-signed builds (`KeychainSigner`); other builds use the pin `install.sh` compiles in.
 - A phone that shares the Mac's Apple ID needs no share: the Mac reads the phone's zone from its own private database. Different Apple IDs use an invite-only share; never make a share public.
 - A Mac whose share membership changed can't overwrite records it wrote before; the relay (`Sources/opProxyRelay/Relay.swift`) deletes and rewrites them ("written under an earlier membership" in the log).
+- 1Password ends the helper's authorization when the app locks, quits or restarts (updates restart it), never on a timer. The SDK reports that as `invalid client id` or a closed channel, and a network outage as `error sending request`; `helper/main.go` sorts them for the daemon, which authorizes again only for the first kind.
+- The helper's hardened runtime can't compile WebAssembly, which the SDK uses for its local functions (password generation, reference validation), and calling one kills the process. Only call SDK methods that go through the 1Password app; opProxy generates passwords itself (`SDK.PasswordRecipe`).
 - `~/.opProxy/daemon.log` is the Mac's log; on the phone, `xcrun devicectl device process launch --console --terminate-existing --device <id> com.chriswa.opproxy.phone` shows `print` output.

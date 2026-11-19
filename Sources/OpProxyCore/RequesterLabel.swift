@@ -46,6 +46,9 @@ public struct OpProxyConfig: Decodable {
     public let requesterLabel: Labeler?
     /// What paired phones call this Mac (MacIdentity).
     public let macName: String?
+    /// The 1Password account opProxy authorizes, by sign-in address, email or ID, when
+    /// `op account list` shows several. Requests for any other account go to the real `op`.
+    public let account: String?
 
     public static func load(_ paths: Paths) -> OpProxyConfig? {
         guard let data = try? Data(contentsOf: paths.config) else { return nil }

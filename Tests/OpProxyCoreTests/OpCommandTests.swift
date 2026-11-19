@@ -27,25 +27,47 @@ final class OpCommandTests: XCTestCase {
     }
 
     func testMetadataNeedsNoApproval() {
-        XCTAssertNil(plan(["whoami"])?.item)
-        XCTAssertNil(plan(["whoami", "--account", "acme.1password.com"])?.item)
-        XCTAssertNil(plan(["account", "list"])?.item)
-        XCTAssertNil(plan(["vault", "list"])?.item)
-        XCTAssertNil(plan(["vault", "get", "Private"])?.item)
-        XCTAssertNil(plan(["item", "list", "--vault", "Private", "--format", "json"])?.item)
-        XCTAssertNil(plan(["item", "list", "--tags", "platform-service"])?.item)
-        XCTAssertNil(plan(["document", "list"])?.item)
+        XCTAssertNotNil(plan(["whoami"])?.metadata)
+        XCTAssertNotNil(plan(["whoami", "--account", "acme.1password.com"])?.metadata)
+        XCTAssertNotNil(plan(["vault", "list"])?.metadata)
+        XCTAssertNotNil(plan(["vault", "get", "Private"])?.metadata)
+        XCTAssertNotNil(plan(["item", "list", "--vault", "Private", "--format", "json"])?.metadata)
+        XCTAssertNotNil(plan(["item", "list", "--tags", "platform-service"])?.metadata)
+        XCTAssertNotNil(plan(["item", "list", "--categories", "Login,API Credential", "--include-archive"])?.metadata)
         XCTAssertNotNil(plan(["item", "get", "x", "--otp"])?.item)
         XCTAssertNotNil(plan(["document", "get", "x"])?.item)
+    }
+
+    func testWritesAreProxied() throws {
+        let create = try XCTUnwrap(plan(["item", "create", "--category", "API Credential", "--title", "Key",
+                                         "credential[concealed]=sk-ant-x"])?.write)
+        XCTAssertEqual(create.kind, .create)
+        XCTAssertEqual(create.category, "ApiCredentials")
+        XCTAssertEqual(try XCTUnwrap(plan(["item", "delete", "abc", "--vault", "Private", "--archive"])?.write).kind,
+                       .delete(archive: true))
+        XCTAssertEqual(try XCTUnwrap(plan(["item", "edit", "abc", "password=x"])?.write).item, "abc")
     }
 
     func testWritesAndUnknownCommandsPassThrough() {
         let shapes: [[String]] = [
             ["--version"],
             [],
-            ["item", "create", "--category", "API Credential", "credential[concealed]=sk-ant-x"],
-            ["item", "delete", "abc", "--vault", "Private", "--archive"],
-            ["item", "edit", "abc", "password=x"],
+            ["account", "list"],
+            ["account", "get"],
+            ["document", "list"],
+            ["item", "create", "--template", "t.json"],
+            ["item", "create", "--category", "Login", "--favorite"],
+            ["item", "create", "--category", "Document", "--title", "x"],
+            ["item", "create", "--title", "no category"],
+            ["item", "create", "--category", "Login", "key[file]=./k.pem"],
+            ["item", "edit", "abc", "--dry-run", "password=x"],
+            ["item", "delete", "abc", "def"],
+            ["item", "delete", "-"],
+            ["item", "move", "abc", "--destination-vault", "x"],
+            ["item", "list", "--favorite"],
+            ["item", "list", "--long"],
+            ["vault", "list", "--group", "Team"],
+            ["vault", "get", "a", "b"],
             ["run", "--no-masking", "--", "/bin/echo", "ok"],
             ["inject", "-i", "tpl"],
             ["item", "share", "abc", "--expires-in", "1h"],
@@ -407,16 +429,19 @@ final class CallerContextTests: XCTestCase {
 }
 
 final class AuthWindowTests: XCTestCase {
-    func testRemaining() {
+    func testAge() {
         let start = Date(timeIntervalSince1970: 0)
         let w = AuthWindow(signedIn: true, authorizedAt: start)
-        XCTAssertEqual(w.remaining(at: start.addingTimeInterval(3600)), 11 * 3600)
-        XCTAssertNil(w.remaining(at: start.addingTimeInterval(12 * 3600)), "12 hours up even if whoami still works")
-        XCTAssertNil(AuthWindow(signedIn: false, authorizedAt: start).remaining(at: start))
-        XCTAssertNil(AuthWindow(signedIn: true, authorizedAt: nil).remaining(at: start))
+        XCTAssertEqual(w.age(at: start.addingTimeInterval(100 * 3600)), 100 * 3600, "no cap: it lasts until 1Password ends it")
+        XCTAssertNil(AuthWindow(signedIn: false, authorizedAt: start).age(at: start))
+        XCTAssertNil(AuthWindow(signedIn: true, authorizedAt: nil).age(at: start))
     }
 
     func testLabels() {
+        XCTAssertEqual(Duration.hours(0), "0h")
+        XCTAssertEqual(Duration.hours(3599), "0h", "counts whole hours up, never rounding")
+        XCTAssertEqual(Duration.hours(3600), "1h")
+        XCTAssertEqual(Duration.hours(141 * 3600 + 3599), "141h")
         XCTAssertEqual(Duration.short(-3), "0s")
         XCTAssertEqual(Duration.short(29.4), "29s")
         XCTAssertEqual(Duration.short(59.7), "59s")
@@ -425,9 +450,7 @@ final class AuthWindowTests: XCTestCase {
         XCTAssertEqual(Duration.short(32 * 60 + 30), "33m")
         XCTAssertEqual(Duration.short(59 * 60 + 50), "59m")
         XCTAssertEqual(Duration.short(3600), "1h")
-        XCTAssertEqual(Duration.short(11 * 3600 + 57 * 60), "12h")
         XCTAssertEqual(Duration.short(11 * 3600 + 30 * 60), "12h")
-        XCTAssertEqual(Duration.short(11 * 3600 + 29 * 60), "11h")
         XCTAssertEqual(Duration.long(11 * 3600 + 32 * 60 + 5), "11h 32m")
         XCTAssertEqual(Duration.long(59 * 60), "59m")
     }

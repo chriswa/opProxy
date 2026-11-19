@@ -1,9 +1,8 @@
 import AppKit
-import LocalAuthentication
 import OpProxyCore
 
-/// Key icon with time left on the daemon's 1Password authorization; a red snapped key once
-/// it's gone. The menu shows the exact expiry and offers an early refresh.
+/// Key icon with how many hours the daemon's 1Password authorization has held; a red snapped
+/// key once it's gone. The menu shows when it started and offers a fresh one.
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let daemon: Daemon
     /// Pairs an iPhone through opProxy iCloud Relay.
@@ -118,7 +117,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 for lifetime in ApprovalLifetime.allCases {
                     let until = lifetime.expiry(from: now)
                     let item = amendItem(lifetime.label + (lifetime == .day ? ", from Now" : ""),
-                                         Amend(key: key, title: approval.title, change: lifetime.label.lowercased(), expiresAt: until))
+                                         Amend(key: key, expiresAt: until))
                     // Checked when the current expiry is what this choice would set now.
                     if let current = approval.expiresAt {
                         let matches = lifetime == .forever ? current >= ApprovalStore.forever
@@ -131,12 +130,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
                 let reach = NSMenu()
                 reach.autoenablesItems = false
                 let narrowTo = key.audience == .allAgents ? approval.grantedTo : key.audience
-                let session = amendItem("This Agent", Amend(key: key, title: approval.title, change: "this agent only",
-                                                              audience: narrowTo))
+                let session = amendItem("This Agent", Amend(key: key, audience: narrowTo))
                 session.state = key.audience == .allAgents ? .off : .on
                 // An all-agents approval granted on a phone or before this was recorded has no session to narrow to.
                 session.isEnabled = narrowTo != nil
-                let all = amendItem("All Agents", Amend(key: key, title: approval.title, change: "all agents", audience: .allAgents))
+                let all = amendItem("All Agents", Amend(key: key, audience: .allAgents))
                 all.state = key.audience == .allAgents ? .on : .off
                 [session, all].forEach(reach.addItem)
                 submenu.addItem(withTitle: "For", action: nil, keyEquivalent: "").submenu = reach
@@ -159,12 +157,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     /// A change to one approval's expiry or audience.
     private final class Amend: NSObject {
-        let key: ApprovalKey, title: String
-        /// Completes "change access to “title” to …".
-        let change: String
+        let key: ApprovalKey
         let audience: ApprovalAudience?, expiresAt: Date?
-        init(key: ApprovalKey, title: String, change: String, audience: ApprovalAudience? = nil, expiresAt: Date? = nil) {
-            (self.key, self.title, self.change, self.audience, self.expiresAt) = (key, title, change, audience, expiresAt)
+        init(key: ApprovalKey, audience: ApprovalAudience? = nil, expiresAt: Date? = nil) {
+            (self.key, self.audience, self.expiresAt) = (key, audience, expiresAt)
         }
     }
 
@@ -175,30 +171,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         return item
     }
 
-    /// The expiry and audience are signed. The daemon re-signs with the context from your
-    /// latest Touch ID approval; only when it has none (e.g. after a restart) does this ask
-    /// for Touch ID, via the system sheet since menus can't host the inline glyph.
+    /// The expiry and audience are signed, so a change is signed again.
     @objc private func amend(_ sender: NSMenuItem) {
         guard let change = sender.representedObject as? Amend else { return }
-        switch daemon.amend(change.key, audience: change.audience, expiresAt: change.expiresAt) {
-        case .changed:
-            lastError = nil
-            render()
-        case .failed(let reason):
-            lastError = "Change failed: \(reason)"
-            render()
-        case .needsTouchID:
-            let context = LAContext()
-            let reason = "change access to “\(change.title)” to \(change.change)"
-            context.evaluateAccessControl(EnclaveSigner.accessControl(), operation: .useKeySign, localizedReason: reason) { ok, _ in
-                DispatchQueue.main.async { [self] in
-                    guard ok else { return }
-                    if case .failed(let reason) = daemon.amend(change.key, audience: change.audience, expiresAt: change.expiresAt,
-                                                               context: context) {
-                        lastError = "Change failed: \(reason)"
-                    }
-                    render()
-                }
+        // Off the main thread: a build without the team's keychain asks for Touch ID to sign.
+        DispatchQueue.global().async { [self] in
+            let result = daemon.amend(change.key, audience: change.audience, expiresAt: change.expiresAt)
+            DispatchQueue.main.async { [self] in
+                if case .failed(let reason) = result { lastError = "Change failed: \(reason)" } else { lastError = nil }
+                render()
             }
         }
     }
@@ -246,11 +227,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         daemon.revoke(action.revocation)
     }
 
-    /// Redraws every 20 seconds, and every second near the end so it counts down in seconds.
+    /// Redraws every minute; the label only counts hours.
     private func tick() {
         render()
-        let remaining = daemon.auth.current.remaining(at: Date()) ?? .infinity
-        timer = Timer.scheduledTimer(withTimeInterval: remaining < 90 ? 1 : 20, repeats: false) { [weak self] _ in self?.tick() }
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: false) { [weak self] _ in self?.tick() }
     }
 
     private func render() {
@@ -269,16 +249,16 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let window = daemon.auth.current
         let now = Date()
         let clock = DateFormatter()
-        clock.dateFormat = "h:mm a"
-        if let remaining = window.remaining(at: now), let expiresAt = window.expiresAt {
-            item.button?.image = StatusIcon.key(remaining: Duration.short(remaining))
-            item.button?.toolTip = "1Password CLI authorized for \(Duration.long(remaining)) more"
-            statusLine.title = "1Password authorized · \(Duration.long(remaining)) left"
-            detailLine.title = "Expires at \(clock.string(from: expiresAt))"
+        clock.dateFormat = Calendar.current.isDateInToday(window.authorizedAt ?? now) ? "h:mm a" : "EEE MMM d, h:mm a"
+        if let age = window.age(at: now), let since = window.authorizedAt {
+            item.button?.image = StatusIcon.key(label: Duration.hours(age))
+            item.button?.toolTip = "1Password authorized \(Duration.long(age)) ago"
+            statusLine.title = "1Password authorized · \(Duration.long(age))"
+            detailLine.title = "Since \(clock.string(from: since)), until 1Password locks or updates"
         } else {
             item.button?.image = StatusIcon.snappedKey()
-            item.button?.toolTip = "1Password CLI not authorized"
-            statusLine.title = window.signedIn ? "1Password authorization is past 12 hours" : "1Password not authorized"
+            item.button?.toolTip = "1Password not authorized"
+            statusLine.title = "1Password not authorized"
             detailLine.title = "The next agent request will prompt 1Password"
         }
         if let lastError { detailLine.title = lastError }

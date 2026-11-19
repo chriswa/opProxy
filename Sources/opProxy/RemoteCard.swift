@@ -27,7 +27,7 @@ enum RemoteCard {
                 ["id": "deny", "label": "Deny", "role": "deny"],
                 ["id": "approve", "label": "Allow", "role": "approve"],
             ],
-            "confirm": prompt.touchIDReason.prefix(1).uppercased() + prompt.touchIDReason.dropFirst(),
+            "confirm": prompt.confirmation.prefix(1).uppercased() + prompt.confirmation.dropFirst(),
         ]
         if let id = prompt.requester.label?.id { doc["surfaceId"] = id }
         if abandoned { doc["notice"] = abandonedNotice }
@@ -53,10 +53,10 @@ enum RemoteCard {
     /// What the agent last said, and the exact command line that asked: what a phone shows
     /// below who and what, in place of `sections`.
     private static func contextBlock(_ prompt: ApprovalPrompt) -> [String: Any] {
-        var block: [String: Any] = ["command": "op " + prompt.request.argv.map(shellQuote).joined(separator: " ")]
+        var block: [String: Any] = ["command": prompt.commandLine]
         if case .agent(let a) = prompt.requester {
-            if let tool = a.caller.toolCommand { block["command"] = tool }
-            if let message = a.lastMessage { block["message"] = message }
+            if let tool = a.caller.toolCommand { block["command"] = prompt.hidingSecrets(tool) }
+            if let message = a.lastMessage { block["message"] = prompt.hidingSecrets(message) }
         }
         return block
     }
@@ -89,25 +89,26 @@ enum RemoteCard {
         func text(_ label: String, _ text: String, mono: Bool) -> [String: Any] {
             mono ? ["kind": "text", "label": label, "text": text, "mono": true] : ["kind": "text", "label": label, "text": text]
         }
-        var request = [row("Request", prompt.item.action)] + prompt.item.details.map { row($0.label, $0.value) }
-        request += [row("Item ID", prompt.target.itemId, mono: true), row("Vault ID", prompt.target.vaultId, mono: true)]
+        var request = [row("Request", prompt.action)] + prompt.details.map { row($0.label, $0.value) }
+        if !prompt.target.itemId.isEmpty { request.append(row("Item ID", prompt.target.itemId, mono: true)) }
+        request.append(row("Vault ID", prompt.target.vaultId, mono: true))
         var sections: [[String: Any]] = []
         sections.append(["kind": "fields", "label": "Request", "rows": request])
-        sections.append(text("Command", "op " + prompt.request.argv.map(shellQuote).joined(separator: " "), mono: true))
+        sections.append(text("Command", prompt.commandLine, mono: true))
         var process: [[String: Any]]
         switch prompt.requester {
         case .agent(let a):
-            if let tool = a.caller.toolCommand { sections.append(text("Agent's shell command", tool, mono: true)) }
-            if let message = a.lastMessage { sections.append(text("Agent's last message", message, mono: false)) }
+            if let tool = a.caller.toolCommand { sections.append(text("Agent's shell command", prompt.hidingSecrets(tool), mono: true)) }
+            if let message = a.lastMessage { sections.append(text("Agent's last message", prompt.hidingSecrets(message), mono: false)) }
             process = [
                 row("Session ID", a.session.sessionId, mono: true),
                 row("Agent process", "\(a.session.agent.displayName) · PID \(a.agentPid)", mono: true),
                 row("Requested by", "PID \(prompt.peerPid)", mono: true),
                 row("Directory", prompt.request.cwd, mono: true),
             ]
-            if let via = a.caller.viaProcess { process.append(row("Called by", String(via.prefix(300)), mono: true)) }
+            if let via = a.caller.viaProcess { process.append(row("Called by", String(prompt.hidingSecrets(via).prefix(300)), mono: true)) }
         case .terminal(let t):
-            sections.append(text("Process chain (nearest first)", t.info.chain.joined(separator: "\n"), mono: true))
+            sections.append(text("Process chain (nearest first)", prompt.hidingSecrets(t.info.chain.joined(separator: "\n")), mono: true))
             process = [
                 row("Terminal", t.info.app + (t.info.tty.map { " · \($0)" } ?? ""), mono: true),
                 row("Tab session", "Unix session \(t.info.sid)", mono: true),

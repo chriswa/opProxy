@@ -1,7 +1,7 @@
 #!/bin/bash
 # Try the iPhone app against a test daemon that runs beside the installed opProxy, with its
-# own state in ~/.opProxy-try, its own menu bar icon, its own opProxy iCloud Relay, and a stub `op`
-# (no 1Password; pairing keys are files).
+# own state in ~/.opProxy-try, its own menu bar icon, its own opProxy iCloud Relay, and a fake
+# 1Password (the debug build's fake helper, which keeps items and pairing keys in a fixture).
 #   phone/try.sh start     build, sign and start the test daemon; install the app if the iPhone is reachable
 #   phone/try.sh pair      open the test daemon's pairing QR code
 #   phone/try.sh request [session]   a fake Claude Code agent asks for a secret; another session queues another
@@ -25,32 +25,29 @@ start)
     mkdir -p "$OPPROXY_HOME" && chmod 700 "$OPPROXY_HOME"
     swift build --package-path "$ROOT" >/dev/null
     rm -rf "$APP"
-    "$ROOT/scripts/assemble-app.sh" "$ROOT/.build/debug/opProxy" "$APP"
+    "$ROOT/scripts/build-helper.sh" "$ROOT/.build/debug/opproxy-sdk"
+    "$ROOT/scripts/assemble-app.sh" "$ROOT/.build/debug/opProxy" "$APP" "$ROOT/.build/debug/opproxy-sdk"
     # opProxy iCloud Relay inside it, as in a release: signed first, since signing the app seals it.
     RELAY="$APP/Contents/Helpers/opProxy iCloud Relay.app"
     "$ROOT/scripts/assemble-app.sh" "$ROOT/.build/debug/opProxyRelay" "$RELAY" relay
     "$ROOT/scripts/sign-app.sh" "$RELAY" | grep -q "signing with profile" || { echo "no profile: run scripts/provision-mac.sh"; exit 1; }
     "$ROOT/scripts/sign-app.sh" "$APP" >/dev/null
-    # Pairing keys are kept as files in $OPPROXY_HOME/items.
-    mkdir -p "$OPPROXY_HOME/items"
+    # 1Password's stand-in: one item to ask for; pairing keys are added to the fixture.
+    mkdir -p "$OPPROXY_HOME/sdk"
+    [ -f "$OPPROXY_HOME/sdk/fixture.json" ] || cat > "$OPPROXY_HOME/sdk/fixture.json" <<'FIXTURE'
+{"vaults": [{"id": "priv0000000000000000000000", "title": "Private", "vaultType": "personal"}],
+ "items": [{"id": "ghtoken0000000000000000000", "title": "GitHub token", "category": "ApiCredentials",
+            "vaultId": "priv0000000000000000000000", "version": 1,
+            "createdAt": "2026-11-01T00:00:00Z", "updatedAt": "2026-11-01T00:00:00Z",
+            "fields": [{"id": "credential", "title": "credential", "fieldType": "Concealed", "value": "ghp_example"}]}]}
+FIXTURE
     cat > "$OPPROXY_REAL_OP" <<'STUB'
 #!/bin/bash
-ITEMS="$(dirname "$0")/items"
-case "$*" in
-  whoami*|"vault list"*) exit 0 ;;
-  "item list --format json"*) echo '[{"id": "ghtoken0000000000000000000", "title": "GitHub token", "vault": {"id": "priv0000000000000000000000", "name": "Private"}}]'; exit 0 ;;
-  "item create "*)
-    ID="pk$(openssl rand -hex 8)"
-    TITLE=$(python3 -c 'import sys; a=sys.argv[1:]; print(a[a.index("--title")+1])' "$@")
-    python3 -c 'import json,sys; print(json.dumps({"id":sys.argv[1],"title":sys.argv[2],"category":"PASSWORD","tags":["opproxy-pairing"],
-"vault":{"id":"priv0000000000000000000000","name":"Private"},"fields":[{"id":"password","purpose":"PASSWORD","value":sys.argv[3]}]}))' \
-        "$ID" "$TITLE" "$(openssl rand -hex 32)" | tee "$ITEMS/$ID"; exit 0 ;;
-  "item get "*) [ -f "$ITEMS/$3" ] && { cat "$ITEMS/$3"; exit 0; }; echo "[ERROR] \"$3\" isn't an item." >&2; exit 1 ;;
-  "item delete "*) [ -f "$ITEMS/$3" ] && { rm "$ITEMS/$3"; exit 0; }; echo "[ERROR] \"$3\" isn't an item." >&2; exit 1 ;;
-esac
+[ "$*" = "account list --format json" ] && { echo '[{"url": "try.1password.com", "email": "try@example.com", "user_uuid": "U", "account_uuid": "A"}]'; exit 0; }
 echo "(stub op) $*"
 STUB
     chmod +x "$OPPROXY_REAL_OP"
+    export OPPROXY_TEST_SDK="$OPPROXY_HOME/sdk/fixture.json"
     OPPROXY_NO_AUTO_AUTH=1 OPPROXY_OP_REQUIREMENT=none nohup "$BIN" daemon >>"$OPPROXY_HOME/launch.log" 2>&1 &
     echo $! > "$PIDFILE"
     echo "test daemon running (log: $OPPROXY_HOME/daemon.log). Pair from its menu bar icon: Pair an iPhone…"

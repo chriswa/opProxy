@@ -22,13 +22,13 @@
 <text x="318" y="310.0" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="middle">opProxy daemon</text>
 <text x="318" y="333.0" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">on your Mac, sorts the command</text>
 <rect x="508" y="272" width="268" height="86" rx="12" fill="#1F1B14" stroke="#4A4232" stroke-width="1.5" stroke-dasharray="5 5"/>
-<text x="524" y="300" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">Writes and anything else</text>
+<text x="524" y="300" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">Anything else</text>
 <text x="524" y="322" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">go to the real <tspan font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">op</tspan>, which</text>
 <text x="524" y="344" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">asks 1Password itself</text>
 <path d="M444,315 L506,315" fill="none" stroke="#BDB39E" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 5" marker-end="url(#m-dim)"/>
 <path d="M318,350 L318,418" fill="none" stroke="#FACC14" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-acc)"/>
-<text x="332" y="377" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">can reveal a secret</text>
-<text x="332" y="400" font-size="14.5" font-weight="400" fill="#F7F2E8" text-anchor="start" font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">read · item get · document get</text>
+<text x="332" y="377" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="start">can reveal or change a secret</text>
+<text x="332" y="400" font-size="14.5" font-weight="400" fill="#F7F2E8" text-anchor="start" font-family="ui-monospace, &quot;SF Mono&quot;, Menlo, Consolas, monospace">read · item get · item edit …</text>
 <path d="M192,315 L108,315 Q96,315 96,327 L96,446" fill="none" stroke="#7FC765" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-grn)"/>
 <rect x="24" y="448" width="144" height="140" rx="12" fill="#1F2A17" stroke="#7FC765" stroke-width="1.5"/>
 <text x="96" y="476" font-size="16" font-weight="600" fill="#7FC765" text-anchor="middle">Lists only</text>
@@ -74,9 +74,9 @@
 <rect x="580" y="792" width="124" height="42" rx="21" fill="#2E1A16" stroke="#EF675C" stroke-width="1.5"/>
 <text x="642" y="818" font-size="16" font-weight="600" fill="#EF675C" text-anchor="middle">Refused</text>
 <rect x="192" y="800" width="252" height="84" rx="12" fill="#2B2619" stroke="#4A4232" stroke-width="1.5"/>
-<text x="318" y="826.0" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="middle">1Password CLI</text>
+<text x="318" y="826.0" font-size="17" font-weight="600" fill="#F7F2E8" text-anchor="middle">1Password SDK</text>
 <text x="318" y="849.0" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">in opProxy’s own</text>
-<text x="318" y="872.0" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">authorized session</text>
+<text x="318" y="872.0" font-size="15" font-weight="400" fill="#BDB39E" text-anchor="middle">authorized helper</text>
 <path d="M318,884 L318,920" fill="none" stroke="#BDB39E" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-dim)"/>
 <path d="M218,930 L218,988 A100,10 0 0 0 418,988 L418,930" fill="#2B2619" stroke="#4A4232" stroke-width="1.5"/>
 <ellipse cx="318" cy="930" rx="100" ry="10" fill="#14120E" stroke="#4A4232" stroke-width="1.5"/>

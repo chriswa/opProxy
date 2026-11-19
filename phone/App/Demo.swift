@@ -13,7 +13,7 @@ enum Demo {
         mac.pairedKeys = [PhoneKey.keyId]
         mac.version = FeedModel.appVersion
         mac.presenceAt = Date()
-        mac.status = FeedProviderStatus(ok: true, label: "1Password", since: now - 3_600_000, until: now + 39_600_000,
+        mac.status = FeedProviderStatus(ok: true, label: "1Password", since: now - 3 * 3_600_000, until: nil,
                                         title: nil, detail: nil)
         return mac
     }

@@ -173,7 +173,7 @@ public struct ItemRequest: Equatable {
         return Detail(label: "Fields", value: "all fields", style: .placeholder)
     }
 
-    /// Completes "opProxy is trying to let Claude … <summary>" in the Touch ID prompt.
+    /// Completes "let Claude … <summary>".
     public func summary(_ target: ItemIdentity) -> String {
         let name = "“\(target.label)”"
         switch kind {
@@ -243,6 +243,10 @@ public struct ItemCatalog {
 
     public init(json: Data) throws {
         entries = try JSONDecoder().decode([Entry].self, from: json)
+    }
+
+    public init(_ items: [ItemIdentity]) {
+        entries = items.map { Entry(id: $0.itemId, title: $0.title, vault: .init(id: $0.vaultId, name: $0.vaultName)) }
     }
 
     /// The item `item` names: by ID, else by exact title, else by title in any case. A vault

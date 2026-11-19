@@ -1,18 +1,18 @@
 import CryptoKit
 import Foundation
-import LocalAuthentication
 import OpProxyCore
 
 /// Signs approvals so a forged or edited approvals.json entry doesn't verify.
 protocol ApprovalSigner {
-    /// `context` is the LAContext the approval dialog's Touch ID already evaluated.
-    func sign(_ payload: Data, context: LAContext?) throws -> Data
+    func sign(_ payload: Data) throws -> Data
     func verify(_ payload: Data, signature: Data) -> Bool
 }
 
 /// For builds without the provisioning profile: a Secure Enclave P-256 key that needs user
-/// presence for every signature, so only a Touch ID approval can produce one. The public key
-/// it verifies against is compiled into this binary (ApprovalKeyPin.swift, written by
+/// presence for every signature. Its blob is a file any process running as you can load, so
+/// the presence check is what keeps an agent from signing with it: each lasting approval,
+/// pairing or change from the menu asks for Touch ID in the system's own sheet. The public
+/// key it verifies against is compiled into this binary (ApprovalKeyPin.swift, written by
 /// install.sh), not read from disk, so swapping in another key blob makes approvals fail
 /// rather than letting forged ones through.
 struct EnclaveSigner: ApprovalSigner {
@@ -46,9 +46,8 @@ struct EnclaveSigner: ApprovalSigner {
         return key.publicKey.rawRepresentation
     }
 
-    func sign(_ payload: Data, context: LAContext?) throws -> Data {
-        let key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: Data(contentsOf: blob),
-                                                            authenticationContext: context)
+    func sign(_ payload: Data) throws -> Data {
+        let key = try SecureEnclave.P256.Signing.PrivateKey(dataRepresentation: Data(contentsOf: blob))
         return try key.signature(for: payload).derRepresentation
     }
 
@@ -73,7 +72,7 @@ struct SoftwareSigner: ApprovalSigner {
         }
     }
 
-    func sign(_ payload: Data, context: LAContext?) throws -> Data {
+    func sign(_ payload: Data) throws -> Data {
         try key.signature(for: payload).derRepresentation
     }
 
@@ -85,34 +84,40 @@ struct SoftwareSigner: ApprovalSigner {
 #endif
 
 /// A Secure Enclave P-256 key kept in opProxy's own keychain access group, which only apps
-/// signed by its team can use: an agent can neither read it, swap it, nor plant one of its own
-/// before opProxy first creates it. Every signature needs user presence, so only a Touch ID
-/// approval can produce one. Builds signed with the provisioning profile use this; others
-/// fall back to `EnclaveSigner`.
+/// signed by its team can use: an agent can neither use it, swap it, nor plant one of its
+/// own before opProxy first creates it. Signing needs no Touch ID, so the dialog's Allow
+/// button signs. Builds signed with the provisioning profile use this; others fall back to
+/// `EnclaveSigner`.
 struct KeychainSigner: ApprovalSigner {
-    static let tag = Data("com.chriswa.opproxy.approval-key".utf8)
+    static let tag = Data("com.chriswa.opproxy.approval-key.2".utf8)
+    /// The key before approvals moved off Touch ID: it needs user presence for every
+    /// signature, so it only verifies now.
+    static let touchIDTag = Data("com.chriswa.opproxy.approval-key".utf8)
     static let accessGroup = "7H2524M5TN.com.chriswa.opproxy"
 
     let publicKey: P256.Signing.PublicKey
-    /// The key this Mac pinned before the keychain held one, if this build has it: approvals
-    /// and paired phones it signed still verify.
-    let legacy: P256.Signing.PublicKey?
+    /// Keys this Mac signed with before: the Touch ID key, and the key it pinned before the
+    /// keychain held one. Approvals and paired phones they signed still verify.
+    let legacy: [P256.Signing.PublicKey]
 
     /// Whether this build may use the access group: it needs the provisioning profile's entitlements.
     static var available: Bool { Entitlement.strings("keychain-access-groups").contains(accessGroup) }
 
-    /// The key, made on first use. Neither step needs Touch ID; only signing does.
+    /// The key, made on first use.
     static func loadOrCreate() throws -> KeychainSigner {
-        let key = try find(context: nil) ?? create()
-        guard let external = SecKeyCopyPublicKey(key).flatMap({ SecKeyCopyExternalRepresentation($0, nil) as Data? }) else {
-            throw SignerError("couldn't read the approval key's public half")
-        }
-        return KeychainSigner(publicKey: try P256.Signing.PublicKey(x963Representation: external),
-                              legacy: EnclaveSigner.pinnedPublicKey)
+        let key = try find(tag) ?? create()
+        let legacy = [try? find(touchIDTag)].compactMap { $0.flatMap(publicKey(of:)) } + [EnclaveSigner.pinnedPublicKey].compactMap { $0 }
+        guard let publicKey = publicKey(of: key) else { throw SignerError("couldn't read the approval key's public half") }
+        return KeychainSigner(publicKey: publicKey, legacy: legacy)
     }
 
-    func sign(_ payload: Data, context: LAContext?) throws -> Data {
-        guard let key = try Self.find(context: context) else { throw SignerError("the approval key is missing from the keychain") }
+    private static func publicKey(of key: SecKey) -> P256.Signing.PublicKey? {
+        SecKeyCopyPublicKey(key).flatMap { SecKeyCopyExternalRepresentation($0, nil) as Data? }
+            .flatMap { try? P256.Signing.PublicKey(x963Representation: $0) }
+    }
+
+    func sign(_ payload: Data) throws -> Data {
+        guard let key = try Self.find(Self.tag) else { throw SignerError("the approval key is missing from the keychain") }
         var error: Unmanaged<CFError>?
         guard let signature = SecKeyCreateSignature(key, .ecdsaSignatureMessageX962SHA256, payload as CFData, &error) as Data? else {
             throw error!.takeRetainedValue() as Error
@@ -122,11 +127,11 @@ struct KeychainSigner: ApprovalSigner {
 
     func verify(_ payload: Data, signature: Data) -> Bool {
         guard let sig = try? P256.Signing.ECDSASignature(derRepresentation: signature) else { return false }
-        return publicKey.isValidSignature(sig, for: payload) || legacy?.isValidSignature(sig, for: payload) == true
+        return ([publicKey] + legacy).contains { $0.isValidSignature(sig, for: payload) }
     }
 
-    private static func find(context: LAContext?) throws -> SecKey? {
-        var query: [String: Any] = [
+    private static func find(_ tag: Data) throws -> SecKey? {
+        let query: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: tag,
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
@@ -134,7 +139,6 @@ struct KeychainSigner: ApprovalSigner {
             kSecUseDataProtectionKeychain as String: true,
             kSecReturnRef as String: true,
         ]
-        if let context { query[kSecUseAuthenticationContext as String] = context }
         var out: CFTypeRef?
         switch SecItemCopyMatching(query as CFDictionary, &out) {
         case errSecSuccess: return (out as! SecKey)
@@ -144,6 +148,7 @@ struct KeychainSigner: ApprovalSigner {
     }
 
     private static func create() throws -> SecKey {
+        let access = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, [.privateKeyUsage], nil)!
         let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
             kSecAttrKeySizeInBits as String: 256,
@@ -153,7 +158,7 @@ struct KeychainSigner: ApprovalSigner {
                 kSecAttrIsPermanent as String: true,
                 kSecAttrApplicationTag as String: tag,
                 kSecAttrAccessGroup as String: accessGroup,
-                kSecAttrAccessControl as String: EnclaveSigner.accessControl(),
+                kSecAttrAccessControl as String: access,
             ] as [String: Any],
         ]
         var error: Unmanaged<CFError>?

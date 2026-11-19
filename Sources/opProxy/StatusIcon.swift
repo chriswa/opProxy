@@ -1,12 +1,12 @@
 import AppKit
 
-/// Menu bar artwork: a key with the time left underneath, or a red snapped key once the
-/// daemon's 1Password authorization is gone.
+/// Menu bar artwork: a key with how long the daemon's 1Password authorization has held
+/// underneath, or a red snapped key once it's gone.
 enum StatusIcon {
     static let height: CGFloat = 22
 
     /// Template image, so it follows the menu bar's light/dark appearance.
-    static func key(remaining label: String) -> NSImage {
+    static func key(label: String) -> NSImage {
         let font = NSFont.monospacedDigitSystemFont(ofSize: 8.5, weight: .semibold)
         let text = NSAttributedString(string: label, attributes: [.font: font, .foregroundColor: NSColor.black])
         let keyImage = symbol(color: .black)

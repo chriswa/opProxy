@@ -30,8 +30,8 @@ The Mac removes an answered or timed-out item by setting its `note`, and deletes
 1. The Mac's QR code holds `opproxy-pair:4:<code>:<Mac's iCloud user record name>:<Mac ID>:<agreement key>`, where the code is 16 random bytes and the agreement key a one-time X25519 public key, both base64url. (Version 3 had no agreement key and an unsealed zone named after the Mac; the phone still pairs with Macs that show one.)
 2. The phone makes the zone `pair-<HMAC of the code>`, invites that iCloud user to it with read/write (or, on the same Apple ID, shares nothing), and writes a `PairingRendezvous` record to the public database: named by an HMAC of the code, holding the invitation (`{"share": url}` or `{"ownZone": name}`) sealed with ChaCha20-Poly1305 under a key derived from the code. Only someone who saw the code can find it or open it.
 3. The Mac accepts the share, refusing one open to anyone with its link, and writes its `hello`.
-4. The phone sends `{"type":"pair","publicKey":"<base64>","name":"iPhone","agreementKey":"<base64>","agreementSignature":"<base64>"}` to the inbox: its own one-time X25519 key, signed by its Secure Enclave key over the Mac's agreement key and ID (`PairingHandshake.phoneStatement`). The Mac shows the phone's name and key fingerprint, and pairs it only once you confirm with Touch ID.
-5. The Mac has 1Password generate the pairing secret, in a Password item titled "opProxy pairing key: …" that opProxy never hands out, and seals it to the key the two agreement keys give (`PairingHandshake`). The answer is `{"type":"pair-result","keyId":"…","ok":true,"sealedSecret":"<base64>"}` or `ok: false` with an `error`. From then on, both sides seal every field. Pairing again replaces the phone's earlier pairing with that Mac, and unpairing deletes the zone and the secret on both sides.
+4. The phone sends `{"type":"pair","publicKey":"<base64>","name":"iPhone","agreementKey":"<base64>","agreementSignature":"<base64>"}` to the inbox: its own one-time X25519 key, signed by its Secure Enclave key over the Mac's agreement key and ID (`PairingHandshake.phoneStatement`). The Mac shows the phone's name and key fingerprint, and pairs it only once you confirm there.
+5. The Mac generates the pairing secret and keeps it in 1Password, in a Password item titled "opProxy pairing key: …" that opProxy never hands out, and seals it to the key the two agreement keys give (`PairingHandshake`). The answer is `{"type":"pair-result","keyId":"…","ok":true,"sealedSecret":"<base64>"}` or `ok: false` with an `error`. From then on, both sides seal every field. Pairing again replaces the phone's earlier pairing with that Mac, and unpairing deletes the zone and the secret on both sides.
 
 ## Item
 
@@ -74,9 +74,11 @@ Every field but `title`, `actions` and `confirm` is optional. `facets` split an 
 ## Status
 
 ```jsonc
-{ "ok": true, "label": "1Password", "since": 1760000000000, "until": 1760043200000 }
+{ "ok": true, "label": "1Password", "since": 1760000000000 }
 { "ok": false, "label": "1Password", "since": …, "title": "1Password authorization lost", "detail": "…" }
 ```
+
+`since` is when the authorization started, or when it was lost. An authorization lasts until 1Password ends it, so there's no end time; Macs from before that also send `until`, when theirs would run out, and phones show the time left for those.
 
 ## Replies
 
@@ -105,4 +107,4 @@ It answers with `{"type":"reply-result","id":"…","ok":true}`, or `ok: false` w
 
 A phone's key is a P-256 key in its Secure Enclave, usable only while the phone is unlocked. `publicKey` is its raw 64-byte X‖Y form, base64. `keyId` is the lowercase hex of the first 16 bytes of SHA-256 of that, and the fingerprint people compare is its first 16 hex digits in groups of four (`ab12 cd34 ef56 7890`).
 
-The challenge also commits to the exact approval each lasting option would store, so a phone's signature can stand in for the Mac's Touch ID-gated approval key: an entry stored from a phone's reply verifies only if it is exactly the grant the phone picked.
+The challenge also commits to the exact approval each lasting option would store, so a phone's signature can stand in for the Mac's approval key: an entry stored from a phone's reply verifies only if it is exactly the grant the phone picked.

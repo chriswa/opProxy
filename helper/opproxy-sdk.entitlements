@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- The 1Password SDK loads 1Password's own library (team 2BUA8C4S2C) from the 1Password
+       app, which the hardened runtime otherwise refuses. The daemon checks that library's
+       signature before starting the helper. -->
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>

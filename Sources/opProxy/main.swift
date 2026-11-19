@@ -2,7 +2,7 @@ import AppKit
 import Foundation
 import OpProxyCore
 
-// Peers (agents, the shim, the session holder) can vanish mid-conversation; a write to a
+// Peers (agents, the shim, the 1Password helper) can vanish mid-conversation; a write to a
 // closed socket or pipe must return EPIPE, not kill the process.
 signal(SIGPIPE, SIG_IGN)
 
@@ -12,11 +12,11 @@ if (arguments[0] as NSString).lastPathComponent == "op" {
 }
 
 let usage = """
-    opProxy — puts an approval dialog in front of agent 1Password CLI reads.
+    opProxy — puts an approval dialog in front of agents' 1Password reads and writes.
 
-    Installed as `op` (a symlink to this binary), it proxies read-only commands from
-    Claude Code, Codex and Cursor sessions through a daemon; everything else execs the
-    real op unchanged.
+    Installed as `op` (a symlink to this binary), it answers secret reads, listings and
+    item writes through a daemon with its own 1Password session; everything else execs
+    the real op unchanged.
 
     Usage:
       opProxy daemon                 Run the daemon (normally started by launchd)
@@ -73,21 +73,28 @@ case "daemon":
         Pairing.confirmer(devices: devices, signer: signer, autoPair: TestKnobs.value("OPPROXY_TEST_AUTO_PAIR") != nil))
     let approver = FanoutApprover(local: local, feed: feed)
     guard let executable = Bundle.main.executablePath else { fail("cannot find my own executable") }
-    let auth = AuthTracker(executable: executable, log: log,
+    // Tests stand in for 1Password with a fixture, served by this same binary.
+    let helper = TestKnobs.value("OPPROXY_TEST_SDK").map { HelperSpec(executable: executable, arguments: ["fake-sdk-helper", $0], requirement: nil) }
+        ?? HelperSpec.bundled(beside: executable)
+    let localOp = LocalOp(candidates: paths.realOpCandidates)
+    let auth = AuthTracker(helper: helper, account: {
+                               AccountChoice.resolve(configured: OpProxyConfig.load(paths)?.account,
+                                                     listing: localOp.run(["account", "list", "--format", "json"], extraEnv: [:], timeout: 15))
+                           }, log: log,
                            pollInterval: Double(TestKnobs.value("OPPROXY_POLL_SECONDS") ?? "") ?? 60,
                            autoAuthorize: TestKnobs.value("OPPROXY_NO_AUTO_AUTH") == nil)
     let daemon = Daemon(paths: paths, approver: approver, log: log, auth: auth, signer: signer, devices: devices)
     let systemEvents = LockDiagnostics.logSystemEvents(to: log)
     // Attached before start(): the startup authorization is the first prompt it explains.
-    let authContext = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? AuthContextPanel(expiresIn: AuthWindow.hardCap, log: log) : nil
+    let authContext = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? AuthContextPanel(log: log) : nil
     auth.promptObserver = authContext
     do { try daemon.start() } catch { fail("could not start: \(error)") }
     feed.authStatus = { (auth.current, auth.isRefreshing) }
     // iPhones are reached through opProxy iCloud Relay, the separately signed helper that
     // holds CloudKit; it only runs while there's a phone to serve.
-    let relay = RelayTransport(linksURL: paths.relayLinks, vault: PairingKeyVault {
+    let relay = RelayTransport(linksURL: paths.relayLinks, vault: PairingKeyVault { deleting in
                                    // Keys are only read once authorized; saving or deleting one may prompt.
-                                   auth.run($0, extraEnv: [:], reason: $0.prefix(2) == ["item", "delete"] ? .unpairing : .pairingKey)
+                                   auth.client(reason: deleting ? .unpairing : .pairingKey).map { $0.0 }
                                },
                                devices: devices, identity: { MacIdentity.current(paths) },
                                authorized: { auth.current.signedIn }, log: log)
@@ -139,8 +146,10 @@ case "test-feed-client":
     FeedTestClient.run(Array(arguments.dropFirst(2)))
 #endif
 
-case "session-holder":
-    SessionHolder.run(paths: paths)
+#if OPPROXY_TESTING
+case "fake-sdk-helper":
+    FakeSDKHelper.run(URL(fileURLWithPath: arguments[2]))
+#endif
 
 case "list":
     let signer = makeApprovalSigner(paths: paths)
@@ -219,8 +228,8 @@ case "status", "refresh":
     }
     let clock = DateFormatter()
     clock.dateFormat = "MMM d h:mm a"
-    if let remaining = status.auth.remaining(), let expiresAt = status.auth.expiresAt {
-        print("1Password: authorized, \(Duration.long(remaining)) left (expires \(clock.string(from: expiresAt)))")
+    if let age = status.auth.age(), let since = status.auth.authorizedAt {
+        print("1Password: authorized \(Duration.long(age)) ago (since \(clock.string(from: since)))")
     } else {
         print("1Password: not authorized")
     }

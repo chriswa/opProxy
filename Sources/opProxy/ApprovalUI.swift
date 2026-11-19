@@ -1,12 +1,8 @@
 import AppKit
-import LocalAuthentication
-import LocalAuthenticationEmbeddedUI
 import OpProxyCore
 
-/// Shows one request at a time in a panel with everything known about it, listening for
-/// Touch ID the moment it appears: the fingerprint glyph is embedded in the panel
-/// (LAAuthenticationView), so there's no system sheet and no button to click. Touch ID also
-/// authorizes signing the approval. Deny or the timeout denies.
+/// Shows one request at a time in a panel with everything known about it. Only a click on
+/// Allow with the mouse or trackpad approves (`GenuineClickButton`); Deny or the timeout denies.
 final class DialogApprover: LocalApprover {
     static let timeout: TimeInterval = 300
 
@@ -66,7 +62,6 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
     let prompt: ApprovalPrompt
     let timeout: TimeInterval
     let onDecision: (Decision?) -> Void
-    private var context: LAContext?
     private var panel: NSPanel?
     private var view: ApprovalView?
     private var decided = false
@@ -82,8 +77,7 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
     /// Returns when the countdown runs out.
     func begin() -> Date {
         retainSelf = self
-        let context = LAContext()
-        let view = ApprovalView(prompt: prompt, actions: self, authContext: context)
+        let view = ApprovalView(prompt: prompt, actions: self)
         self.view = view
         let panel = GuardedPanel(contentRect: NSRect(origin: .zero, size: view.fittingSize),
                                  styleMask: [.titled, .fullSizeContentView], backing: .buffered, defer: false)
@@ -102,7 +96,6 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
         panel.presentForAnswer()
         panel.ignoreMouse(for: GuardedPanel.clickGuard)
         self.panel = panel
-        listen(with: context)
         let deadline = Date().addingTimeInterval(timeout)
         view.setRemaining(Int(timeout))
         ticker = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
@@ -113,38 +106,9 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
         return deadline
     }
 
-    /// Evaluating the approval key's own access control means this Touch ID also authorizes
-    /// signing the approval. The embedded view bound to `context` shows the prompt inline.
-    private func listen(with context: LAContext) {
-        self.context = context
-        context.evaluateAccessControl(EnclaveSigner.accessControl(), operation: .useKeySign,
-                                      localizedReason: prompt.touchIDReason) { ok, error in
-            DispatchQueue.main.async { [self] in
-                guard !decided else { return }
-                if ok {
-                    finish(.approved(.touchID(context), view?.selectedScope ?? .once))
-                } else {
-                    let reason = (error as? LAError).map(Self.describe) ?? "Touch ID didn't approve"
-                    view?.showRetry(note: "\(reason). Try again, or deny.")
-                }
-            }
-        }
-    }
-
-    func retry() {
-        guard !decided else { return }
-        let context = LAContext()
-        view?.replaceAuthContext(context)
-        listen(with: context)
-    }
-
-    private static func describe(_ error: LAError) -> String {
-        switch error.code {
-        case .authenticationFailed: return "Fingerprint not recognized"
-        case .userCancel, .systemCancel, .appCancel: return "Touch ID was cancelled"
-        case .biometryLockout: return "Touch ID is locked out"
-        default: return "Touch ID didn't approve"
-        }
+    func allow() {
+        guard !decided, let view else { return }
+        finish(.approved(.mac, view.selectedScope))
     }
 
     func deny() { finish(.denied) }
@@ -164,8 +128,6 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
         guard !decided else { return }
         decided = true
         ticker?.invalidate()
-        // An approving context stays valid until the daemon has signed with it.
-        if case .approved = decision {} else { context?.invalidate() }
         panel?.orderOut(nil)
         panel = nil
         onDecision(decision)
@@ -174,7 +136,7 @@ private final class ApprovalSession: NSObject, ApprovalViewActions {
 }
 
 protocol ApprovalViewActions: AnyObject {
-    func retry()
+    func allow()
     func deny()
     func openSession()
 }
@@ -185,10 +147,9 @@ final class ApprovalView: NSView {
     private static let inner = width - 48
 
     private weak var actions: ApprovalViewActions?
-    private let retryButton = NSButton(title: "Try Again", target: nil, action: nil)
+    private let allowButton = GenuineClickButton(title: "Allow", target: nil, action: nil)
     private let denyButton = NSButton(title: "Deny", target: nil, action: nil)
     private let note = NSTextField(wrappingLabelWithString: "")
-    private let authSlot = NSView()
     private let waitingLabel = NSTextField(labelWithString: "")
     private let durationControl = NSSegmentedControl()
     /// Agents only: which agents a lasting approval covers.
@@ -203,8 +164,7 @@ final class ApprovalView: NSView {
     /// The dialog as plain text, one entry per block, appended as each block is built.
     private var transcript: [String] = []
 
-    /// `authContext` drives the embedded Touch ID glyph; nil draws a static one (previews).
-    init(prompt: ApprovalPrompt, actions: ApprovalViewActions?, authContext: LAContext?) {
+    init(prompt: ApprovalPrompt, actions: ApprovalViewActions?) {
         self.actions = actions
         super.init(frame: .zero)
         wantsLayer = true
@@ -240,18 +200,17 @@ final class ApprovalView: NSView {
         switch prompt.requester {
         case .agent(let agent):
             if let tool = agent.caller.toolCommand {
-                stack.addArrangedSubview(section("Agent's shell command", tool, mono: true, maxLines: 8))
+                stack.addArrangedSubview(section("Agent's shell command", prompt.hidingSecrets(tool), mono: true, maxLines: 8))
             }
             if let message = agent.lastMessage {
-                stack.addArrangedSubview(section("Agent's last message", message, mono: false, maxLines: 6))
+                stack.addArrangedSubview(section("Agent's last message", prompt.hidingSecrets(message), mono: false, maxLines: 6))
             }
         case .terminal(let terminal):
-            stack.addArrangedSubview(section("Process chain (nearest first)", terminal.info.chain.joined(separator: "\n"),
-                                             mono: true, maxLines: 8))
+            stack.addArrangedSubview(section("Process chain (nearest first)",
+                                             prompt.hidingSecrets(terminal.info.chain.joined(separator: "\n")), mono: true, maxLines: 8))
         }
         stack.addArrangedSubview(metadata(prompt))
         stack.addArrangedSubview(footer(prompt))
-        replaceAuthContext(authContext)
         stack.arrangedSubviews.forEach { $0.widthAnchor.constraint(lessThanOrEqualToConstant: Self.inner).isActive = true }
     }
 
@@ -259,31 +218,6 @@ final class ApprovalView: NSView {
 
     override var wantsUpdateLayer: Bool { true }
     override func updateLayer() { layer?.backgroundColor = Caution.background.cgColor }
-
-    static let glyphSize: CGFloat = 38
-
-    /// Puts a Touch ID glyph for `context` in the footer and hides any retry state.
-    func replaceAuthContext(_ context: LAContext?) {
-        authSlot.subviews.forEach { $0.removeFromSuperview() }
-        let glyph: NSView
-        if let context {
-            glyph = LAAuthenticationView(context: context, controlSize: .regular)
-        } else {
-            let image = NSImageView(image: NSImage(systemSymbolName: "touchid", accessibilityDescription: "Touch ID")!)
-            image.symbolConfiguration = .init(pointSize: 30, weight: .regular).applying(.init(paletteColors: [.systemPink]))
-            glyph = image
-        }
-        glyph.translatesAutoresizingMaskIntoConstraints = false
-        authSlot.addSubview(glyph)
-        NSLayoutConstraint.activate([
-            glyph.centerXAnchor.constraint(equalTo: authSlot.centerXAnchor),
-            glyph.centerYAnchor.constraint(equalTo: authSlot.centerYAnchor),
-            glyph.widthAnchor.constraint(equalToConstant: Self.glyphSize),
-            glyph.heightAnchor.constraint(equalToConstant: Self.glyphSize),
-        ])
-        retryButton.isHidden = true
-        note.isHidden = true
-    }
 
     /// The Deny button counts down to the automatic denial; red for the last 20 seconds.
     func setRemaining(_ seconds: Int) {
@@ -303,10 +237,10 @@ final class ApprovalView: NSView {
         waitingLabel.isHidden = count == 0
     }
 
-    func showRetry(note text: String) {
+    /// Says why a click didn't count.
+    func showNote(_ text: String) {
         note.stringValue = text
         note.isHidden = false
-        retryButton.isHidden = false
     }
 
     // MARK: Sections
@@ -362,7 +296,7 @@ final class ApprovalView: NSView {
             row.addArrangedSubview(link)
         }
 
-        let wants = Self.label("wants access to", size: 13)
+        let wants = Self.label(Self.verb(prompt.subject), size: 13)
         let target = prompt.target
         let itemText = NSMutableAttributedString(string: target.vaultName, attributes: [
             .font: NSFont.systemFont(ofSize: Self.headlineSize, weight: .medium), .foregroundColor: Caution.text])
@@ -378,6 +312,16 @@ final class ApprovalView: NSView {
     }
 
     static let headlineSize: CGFloat = 28
+
+    private static func verb(_ subject: Subject) -> String {
+        guard case .write(let w) = subject else { return "wants access to" }
+        switch w.kind {
+        case .create: return "wants to create"
+        case .edit: return "wants to edit"
+        case .delete(archive: false): return "wants to delete"
+        case .delete(archive: true): return "wants to archive"
+        }
+    }
 
     private static func headline(_ text: NSAttributedString) -> NSTextField {
         let field = NSTextField(wrappingLabelWithString: "")
@@ -397,17 +341,18 @@ final class ApprovalView: NSView {
             grid.addRow(with: [Self.label(label, size: 13), field])
             lines.append("\(label): \(field.stringValue)")
         }
-        row("Request", Self.value(prompt.item.action, size: 14, weight: .medium))
-        for detail in prompt.item.details {
+        row("Request", Self.value(prompt.action, size: 14, weight: .medium))
+        for detail in prompt.details {
             switch detail.style {
             case .normal: row(detail.label, Self.value(detail.value, size: 14, weight: .medium))
             case .placeholder: row(detail.label, Self.value(detail.value, size: 14, color: Caution.secondary))
             }
         }
-        row("Item ID", Self.value(prompt.target.itemId, size: 12, mono: true, color: Caution.secondary))
+        if !prompt.target.itemId.isEmpty {
+            row("Item ID", Self.value(prompt.target.itemId, size: 12, mono: true, color: Caution.secondary))
+        }
         row("Vault ID", Self.value(prompt.target.vaultId, size: 12, mono: true, color: Caution.secondary))
-        let command = "op " + prompt.request.argv.map(shellQuote).joined(separator: " ")
-        row("Command", Self.value(command, size: 12, mono: true))
+        row("Command", Self.value(prompt.commandLine, size: 12, mono: true))
         Self.styleLabelColumn(grid)
         return CardView(content: grid, width: Self.inner, inset: NSEdgeInsets(top: 12, left: 0, bottom: 12, right: 14))
     }
@@ -428,7 +373,7 @@ final class ApprovalView: NSView {
             row("Agent process", "\(a.session.agent.displayName) · PID \(a.agentPid)")
             row("Requested by", "PID \(prompt.peerPid)")
             row("Directory", prompt.request.cwd)
-            if let via = a.caller.viaProcess { row("Called by", String(via.prefix(300))) }
+            if let via = a.caller.viaProcess { row("Called by", String(prompt.hidingSecrets(via).prefix(300))) }
         case .terminal(let t):
             row("Terminal", t.info.app + (t.info.tty.map { " · \($0)" } ?? ""))
             row("Tab session", "Unix session \(t.info.sid)")
@@ -439,7 +384,7 @@ final class ApprovalView: NSView {
         return grid
     }
 
-    /// What Touch ID will grant; chosen before touching.
+    /// What Allow will grant; chosen before clicking it.
     var selectedScope: ApprovalScope {
         let i = max(0, durationControl.selectedSegment)
         guard isAgent else { return options[i].scope }
@@ -452,7 +397,7 @@ final class ApprovalView: NSView {
         let scope = selectedScope
         reachControl.isEnabled = scope != .once
         guard let option = options.first(where: { $0.scope == scope }) else { return }
-        hint.stringValue = "Touch ID " + option.hint.prefix(1).lowercased() + option.hint.dropFirst()
+        hint.stringValue = option.hint
         hint.textColor = scope == .lasting(.forever, .allAgents) ? Caution.danger : Caution.secondary
     }
 
@@ -466,8 +411,8 @@ final class ApprovalView: NSView {
 
     private func footer(_ prompt: ApprovalPrompt) -> NSView {
         let defaultIndex: Int
-        (options, defaultIndex) = ApprovalOptions.for(prompt.requester)
-        if case .agent = prompt.requester { isAgent = true }
+        (options, defaultIndex) = ApprovalOptions.for(prompt.requester, write: prompt.isWrite)
+        if case .agent = prompt.requester, !prompt.isWrite { isAgent = true }
         let choices = NSGridView()
         choices.rowSpacing = 6
         choices.columnSpacing = 10
@@ -481,6 +426,8 @@ final class ApprovalView: NSView {
             Self.segments(durationControl, options.map(\.label), selected: defaultIndex)
             choices.addRow(with: [Self.label("Allow", size: 13), durationControl])
         }
+        // A write offers only Once: nothing to choose.
+        choices.isHidden = options.count == 1
         for control in [durationControl, reachControl] {
             control.target = self
             control.action = #selector(choiceChanged)
@@ -503,20 +450,19 @@ final class ApprovalView: NSView {
         text.setCustomSpacing(8, after: choices)
         text.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        for (button, action) in [(denyButton, #selector(deny)), (retryButton, #selector(retry))] {
+        for (button, action) in [(denyButton, #selector(deny)), (allowButton, #selector(allow))] {
             button.target = self
             button.action = action
             button.bezelStyle = .rounded
             button.controlSize = .large
         }
-        retryButton.isHidden = true
-        authSlot.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            authSlot.widthAnchor.constraint(equalToConstant: Self.glyphSize + 8),
-            authSlot.heightAnchor.constraint(equalToConstant: Self.glyphSize + 8),
-        ])
+        allowButton.attributedTitle = NSAttributedString(string: "Allow", attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .bold), .foregroundColor: Caution.accent])
+        allowButton.onSynthetic = { [weak self] pid in
+            self?.showNote("That click came from another app (PID \(pid)), not your mouse or trackpad, so it didn't count.")
+        }
 
-        let row = NSStackView(views: [text, NSView(), denyButton, retryButton, authSlot])
+        let row = NSStackView(views: [text, NSView(), denyButton, allowButton])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 12
@@ -534,7 +480,7 @@ final class ApprovalView: NSView {
         scopeChanged()
     }
     #endif
-    @objc private func retry() { actions?.retry() }
+    @objc private func allow() { actions?.allow() }
     @objc private func deny() { actions?.deny() }
     @objc private func openSession() { actions?.openSession() }
 
@@ -627,9 +573,9 @@ final class ApprovalView: NSView {
     }
 }
 
-/// Only Touch ID and deliberate mouse input may act on an approval: keystrokes are dropped
-/// (except ⌘C, to copy text), and clicks are ignored briefly after the panel appears, since a
-/// click already under way can land on a button that just popped up beneath the pointer.
+/// Only deliberate mouse input may act on an approval: keystrokes are dropped (except ⌘C, to
+/// copy text), and clicks are ignored briefly after the panel appears, since a click already
+/// under way can land on a button that just popped up beneath the pointer.
 final class GuardedPanel: NSPanel {
     static let clickGuard: TimeInterval = 0.5
     private var mouseArmedAt = Date.distantPast
@@ -705,7 +651,7 @@ enum Caution {
     static let stripeHeight: CGFloat = 14
 
     /// Hidden title and window buttons: the hazard stripe is the top edge, and the only ways
-    /// out are Touch ID, Deny/Esc, or the timeout.
+    /// out are Allow, Deny, or the timeout.
     static func style(_ window: NSWindow) {
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
@@ -742,8 +688,36 @@ final class HazardStripe: NSView {
     }
 }
 
+/// A button only the mouse or trackpad can press. Another app with Accessibility permission
+/// can post clicks or press a button through the accessibility API; neither counts here.
+/// Posted clicks carry the poster's process ID, where the hardware's carry 0: the same test
+/// the window server applies to clicks on macOS's own security prompts (sender 0 or self).
+final class GenuineClickButton: NSButton {
+    /// Told the posting process's ID when a click came from another app.
+    var onSynthetic: ((Int64) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        if let source = Self.poster(of: event) {
+            onSynthetic?(source)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    override func accessibilityPerformPress() -> Bool { false }
+
+    /// The process that posted `event`, if it wasn't the hardware (or this app); nil for a
+    /// genuine click. -1 when there's no click at all, as for a press through accessibility.
+    static func poster(of event: NSEvent?) -> Int64? {
+        guard let event, [.leftMouseDown, .leftMouseUp].contains(event.type) else { return -1 }
+        let source = event.cgEvent?.getIntegerValueField(.eventSourceUnixProcessID) ?? -1
+        return source == 0 || source == Int64(getpid()) ? nil : source
+    }
+}
+
 func shellQuote(_ s: String) -> String {
-    let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_./:=@,+%"))
+    // ‹hidden› stands in for a value the command writes; it never needs quoting.
+    let safe = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_./:=@,+%‹›"))
     if !s.isEmpty, s.unicodeScalars.allSatisfy(safe.contains) { return s }
     return "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
@@ -763,12 +737,19 @@ final class ScriptedApprover: LocalApprover {
     }
 
     func requestApproval(_ prompt: ApprovalPrompt, completion: @escaping (Decision) -> Void) {
+        let summary: String
+        switch prompt.subject {
+        case .read(let r): summary = r.summary(prompt.target)
+        case .write(let w): summary = w.summary(prompt.target)
+        }
         let shown: [String: Any] = [
-            "summary": prompt.item.summary(prompt.target),
+            "summary": summary,
             "item": prompt.target.title,
             "vault": prompt.target.vaultName,
             "itemId": prompt.target.itemId,
-            "details": prompt.item.details.map { "\($0.label)=\($0.value)" },
+            "details": prompt.details.map { "\($0.label)=\($0.value)" },
+            "command": prompt.commandLine,
+            "options": ApprovalOptions.for(prompt.requester, write: prompt.isWrite).options.map(\.id),
             "headline": prompt.requester.headline,
             "requester": prompt.requester.name,
             "label": prompt.requester.labelTitle ?? NSNull(),
@@ -776,9 +757,9 @@ final class ScriptedApprover: LocalApprover {
         var fields = shown
         switch prompt.requester {
         case .agent(let a):
-            fields["toolCommand"] = a.caller.toolCommand ?? NSNull()
-            fields["via"] = a.caller.viaProcess ?? NSNull()
-            fields["lastMessage"] = a.lastMessage.map { String($0.prefix(80)) } ?? NSNull()
+            fields["toolCommand"] = a.caller.toolCommand.map(prompt.hidingSecrets) ?? NSNull()
+            fields["via"] = a.caller.viaProcess.map(prompt.hidingSecrets) ?? NSNull()
+            fields["lastMessage"] = a.lastMessage.map { String(prompt.hidingSecrets($0).prefix(80)) } ?? NSNull()
         case .terminal(let t):
             fields["chain"] = t.info.chain.map { $0.split(separator: " ", maxSplits: 2).last.map(String.init) ?? $0 }
         }

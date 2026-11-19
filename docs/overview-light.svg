@@ -24,22 +24,22 @@
 <path d="M360,370 L360,438" fill="none" stroke="#3D8A2A" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-grn)"/>
 <text x="374" y="410" font-size="15" font-weight="400" fill="#3D8A2A" text-anchor="start">allowed</text>
 <rect x="240" y="440" width="240" height="70" rx="12" fill="#FFFFFF" stroke="#D9CFBB" stroke-width="1.5"/>
-<text x="360" y="469" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="middle">1Password CLI</text>
-<text x="360" y="492" font-size="15" font-weight="400" fill="#6B6252" text-anchor="middle">in opProxy’s authorized session</text>
+<text x="360" y="469" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="middle">1Password SDK</text>
+<text x="360" y="492" font-size="15" font-weight="400" fill="#6B6252" text-anchor="middle">in opProxy’s 1Password helper</text>
 <path d="M360,510 L360,546" fill="none" stroke="#6B6252" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-dim)"/>
 <path d="M260,556 L260,614 A100,10 0 0 0 460,614 L460,556" fill="#FFFFFF" stroke="#D9CFBB" stroke-width="1.5"/>
 <ellipse cx="360" cy="556" rx="100" ry="10" fill="#F3ECDD" stroke="#D9CFBB" stroke-width="1.5"/>
 <text x="360" y="596" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="middle">1Password</text>
 <path d="M260,590 L222,590 Q210,590 210,578 L210,337 Q210,325 222,325 L238,325" fill="none" stroke="#B07D00" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#m-acc)"/>
-<text x="196" y="420" font-size="16" font-weight="600" fill="#8A6100" text-anchor="end">Every 12 hours</text>
+<text x="196" y="420" font-size="16" font-weight="600" fill="#8A6100" text-anchor="end">When opProxy starts</text>
 <text x="196" y="444" font-size="15" font-weight="400" fill="#6B6252" text-anchor="end">1Password asks you</text>
 <text x="196" y="466" font-size="15" font-weight="400" fill="#6B6252" text-anchor="end">to authorize</text>
-<text x="196" y="488" font-size="15" font-weight="400" fill="#6B6252" text-anchor="end">opProxy’s session</text>
+<text x="196" y="488" font-size="15" font-weight="400" fill="#6B6252" text-anchor="end">opProxy’s helper</text>
 <path d="M482,310 L538,310" fill="none" stroke="#B07D00" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-start="url(#m-acc)" marker-end="url(#m-acc)"/>
 <rect x="540" y="262" width="236" height="96" rx="12" fill="#FFFFFF" stroke="#D9CFBB" stroke-width="1.5"/>
 <text x="556" y="292" font-size="17" font-weight="600" fill="#1F1B14" text-anchor="start">opProxy’s dialog</text>
-<text x="556" y="316" font-size="15" font-weight="400" fill="#6B6252" text-anchor="start">every secret read: item,</text>
-<text x="556" y="338" font-size="15" font-weight="400" fill="#6B6252" text-anchor="start">agent, command, Touch ID</text>
+<text x="556" y="316" font-size="15" font-weight="400" fill="#6B6252" text-anchor="start">every secret read or write:</text>
+<text x="556" y="338" font-size="15" font-weight="400" fill="#6B6252" text-anchor="start">item, agent, command</text>
 <path d="M482,350 L508,350 Q520,350 520,362 L520,416 Q520,428 532,428 L558,428" fill="none" stroke="#6B6252" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 5" marker-start="url(#m-dim)" marker-end="url(#m-dim)"/>
 <rect x="560" y="400" width="216" height="60" rx="12" fill="#FBF7EE" stroke="#D9CFBB" stroke-width="1.5" stroke-dasharray="5 5"/>
 <text x="576" y="425" font-size="16" font-weight="600" fill="#1F1B14" text-anchor="start">iPhone app</text>

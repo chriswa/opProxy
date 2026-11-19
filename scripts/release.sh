@@ -24,6 +24,7 @@ printf '%s\n' "// Release builds keep the approval key in the keychain; nothing 
     "let pinnedApprovalPublicKey: String? = nil" > "$OUT/src/Sources/opProxy/ApprovalKeyPin.swift"
 swift build -c release --package-path "$OUT/src" 2>&1 | grep -E "error|Build complete" || true
 [ -x "$OUT/src/.build/release/opProxy" ] && [ -x "$OUT/src/.build/release/opProxyRelay" ] || { echo "build failed"; exit 1; }
+"$OUT/src/scripts/build-helper.sh" "$OUT/opproxy-sdk"
 
 echo "== Developer ID provisioning profile"
 (cd "$ROOT/phone" && xcodegen generate --quiet)
@@ -49,7 +50,7 @@ codesign -d --entitlements :- "$OUT/stub/opProxy.app" > "$OPPROXY_ENTITLEMENTS" 
 echo "== signing"
 APP="$OUT/opProxy.app"
 RELAY="$APP/Contents/Helpers/opProxy iCloud Relay.app"
-"$ROOT/scripts/assemble-app.sh" "$OUT/src/.build/release/opProxy" "$APP"
+"$ROOT/scripts/assemble-app.sh" "$OUT/src/.build/release/opProxy" "$APP" "$OUT/opproxy-sdk"
 # The relay first: signing the app seals what's inside it.
 "$ROOT/scripts/assemble-app.sh" "$OUT/src/.build/release/opProxyRelay" "$RELAY" relay
 "$ROOT/scripts/sign-app.sh" "$RELAY" | grep -q "signing with profile: Developer ID" || { echo "relay not signed with Developer ID"; exit 1; }

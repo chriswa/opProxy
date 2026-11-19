@@ -2,37 +2,43 @@ import FeedProtocol
 import Foundation
 
 /// Keeps each pairing's secret in 1Password: one Password item per paired phone, in the
-/// account's default vault (Private, Personal or Employee). The daemon makes it when a phone
-/// pairs, reads it back once 1Password has authorized its session at startup, and deletes
-/// it on unpair. An agent running as you can't read it without going through 1Password's
-/// authorization, and the daemon refuses to proxy it to anyone (`isPairingKey`).
+/// account's own vault (Private, Personal or Employee). The daemon makes it when a phone
+/// pairs, reads it back once 1Password has authorized it at startup, and deletes it on
+/// unpair. An agent running as you can't read it without going through 1Password's
+/// authorization, and the daemon refuses to hand it to anyone (`isPairingKey`).
 ///
-/// 1Password generates the secret itself (`--generate-password`), so it never appears in a
-/// command line, where other processes could see it, or in a file.
+/// The secret is generated here and goes to 1Password over the helper's pipe, so it never
+/// appears in a command line or a file.
 public struct PairingKeyVault {
     public static let titlePrefix = "opProxy pairing key"
     public static let tag = "opproxy-pairing"
 
-    /// Runs `op` with these arguments in the daemon's authorized session.
-    private let run: ([String]) -> ProxyResponse
+    /// The daemon's authorized 1Password session; getting it may ask 1Password, saying why
+    /// (true: to delete a key).
+    private let client: (_ deleting: Bool) -> Result<OnePassword, SDK.Failure>
 
-    public init(run: @escaping ([String]) -> ProxyResponse) {
-        self.run = run
+    public init(client: @escaping (_ deleting: Bool) -> Result<OnePassword, SDK.Failure>) {
+        self.client = client
     }
 
     public struct Failure: Error, CustomStringConvertible, Equatable {
         public let description: String
     }
 
-    /// Whether a proxied request names a pairing key. Renaming an item is a write, which
-    /// needs 1Password's own authorization, so the title is a safe thing to go by.
+    /// Whether a request names a pairing key. Renaming an item is a write, which opProxy also
+    /// refuses for these, so the title is a safe thing to go by.
     public static func isPairingKey(title: String) -> Bool { title.hasPrefix(titlePrefix) }
 
     /// Makes the item for a newly paired phone and returns its ID with the secret.
     public func create(phoneName: String, macName: String) throws -> (itemId: String, secret: Data) {
-        let response = run(["item", "create", "--category", "password", "--title", "\(Self.titlePrefix): \(phoneName) · \(macName)",
-                            "--tags", Self.tag, "--generate-password=letters,digits,64", "--format", "json", "--reveal"])
-        let item = try parse(response, doing: "create the pairing key")
+        let op = try session(doing: "create the pairing key")
+        let vault = try get(op.vaults(), doing: "create the pairing key").first { $0.vaultType == "personal" }
+        guard let vault else { throw Failure(description: "could not create the pairing key: this account has no Private vault") }
+        let password = SDK.PasswordRecipe(length: 64, digits: true, symbols: false).generate()
+        let item = try get(op.create(SDK.ItemCreate(
+            category: "Password", vaultId: vault.id, title: "\(Self.titlePrefix): \(phoneName) · \(macName)",
+            fields: [SDK.Field(id: "password", title: "password", fieldType: "Concealed", value: password)],
+            tags: [Self.tag])), doing: "create the pairing key")
         return (item.id, try secret(of: item))
     }
 
@@ -40,8 +46,12 @@ public struct PairingKeyVault {
     /// pairing title and tag. Nothing checks it's the very key paired: planting another would
     /// take writing to 1Password, which already reveals more than this key protects.
     public func load(itemId: String) throws -> PairingKey {
-        let item = try parse(run(["item", "get", itemId, "--format", "json", "--reveal"]), doing: "read the pairing key")
-        guard Self.isPairingKey(title: item.title), item.tags?.contains(Self.tag) == true, item.category == "PASSWORD" else {
+        let op = try session(doing: "read the pairing key")
+        guard let vaultId = try find(itemId, in: op, doing: "read the pairing key") else {
+            throw Failure(description: "1Password item \(itemId) is gone")
+        }
+        let item = try get(op.item(vaultId: vaultId, itemId: itemId), doing: "read the pairing key")
+        guard Self.isPairingKey(title: item.title), item.tags.contains(Self.tag), item.category == "Password" else {
             throw Failure(description: "1Password item \(itemId) isn't an opProxy pairing key")
         }
         return PairingKey(secret: try secret(of: item))
@@ -49,39 +59,31 @@ public struct PairingKeyVault {
 
     /// Deletes a pairing's item, for unpairing. An item that's already gone counts as deleted.
     public func delete(itemId: String) throws {
-        let response = run(["item", "delete", itemId])
-        let stderr = String(decoding: response.stderr, as: UTF8.self)
-        guard response.exitCode == 0 || stderr.contains("isn't an item") else {
-            throw Failure(description: "could not delete the pairing key: \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))")
-        }
+        let op = try get(client(true), doing: "delete the pairing key")
+        guard let vaultId = try find(itemId, in: op, doing: "delete the pairing key") else { return }
+        _ = try get(op.delete(vaultId: vaultId, itemId: itemId), doing: "delete the pairing key")
     }
 
-    struct Item: Decodable {
-        struct Field: Decodable {
-            let id: String?
-            let purpose: String?
-            let value: String?
-        }
-        let id: String
-        let title: String
-        let category: String
-        let tags: [String]?
-        let fields: [Field]?
+    private func session(doing what: String) throws -> OnePassword {
+        try get(client(false), doing: what)
     }
 
-    private func parse(_ response: ProxyResponse, doing what: String) throws -> Item {
-        guard response.exitCode == 0 else {
-            let stderr = String(decoding: response.stderr, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw Failure(description: "could not \(what): \(stderr.isEmpty ? "op exited \(response.exitCode)" : stderr)")
+    /// The vault holding `itemId`, archived or not.
+    private func find(_ itemId: String, in op: OnePassword, doing what: String) throws -> String? {
+        for vault in try get(op.vaults(), doing: what) {
+            if try get(op.items(vaultId: vault.id, archived: true), doing: what).contains(where: { $0.id == itemId }) {
+                return vault.id
+            }
         }
-        guard let item = try? JSONDecoder().decode(Item.self, from: response.stdout) else {
-            throw Failure(description: "could not \(what): op's output wasn't an item")
-        }
-        return item
+        return nil
     }
 
-    private func secret(of item: Item) throws -> Data {
-        let field = item.fields?.first { $0.purpose == "PASSWORD" } ?? item.fields?.first { $0.id == "password" }
+    private func get<T>(_ result: Result<T, SDK.Failure>, doing what: String) throws -> T {
+        try result.mapError { Failure(description: "could not \(what): \($0.message)") }.get()
+    }
+
+    private func secret(of item: SDK.Item) throws -> Data {
+        let field = item.fields.first { $0.id == "password" } ?? item.fields.first { $0.fieldType == "Concealed" }
         guard let value = field?.value, value.count >= 32 else {
             throw Failure(description: "1Password item \(item.id) has no generated password")
         }

@@ -1,11 +1,9 @@
 import Foundation
 
-/// The daemon's 1Password authorization as the menu bar sees it. 1Password doesn't report
-/// expiry, so the window is counted from when opProxy first saw the session signed in.
+/// The daemon's 1Password authorization as the menu bar sees it. It lasts until 1Password
+/// ends it (the app locks, quits or updates), so it's shown as how long it has held,
+/// counted from when opProxy's session was authorized.
 public struct AuthWindow: Codable, Equatable {
-    /// 1Password ends every CLI authorization this long after it starts.
-    public static let hardCap: TimeInterval = 12 * 60 * 60
-
     public let signedIn: Bool
     public let authorizedAt: Date?
 
@@ -14,12 +12,10 @@ public struct AuthWindow: Codable, Equatable {
         self.authorizedAt = authorizedAt
     }
 
-    public var expiresAt: Date? { authorizedAt?.addingTimeInterval(Self.hardCap) }
-
-    /// Seconds left, or nil when `whoami` fails or the 12 hours are up.
-    public func remaining(at now: Date = Date()) -> TimeInterval? {
-        guard signedIn, let expiresAt, expiresAt > now else { return nil }
-        return expiresAt.timeIntervalSince(now)
+    /// How long it has been authorized, or nil while it isn't.
+    public func age(at now: Date = Date()) -> TimeInterval? {
+        guard signedIn, let authorizedAt else { return nil }
+        return max(0, now.timeIntervalSince(authorizedAt))
     }
 }
 

@@ -92,7 +92,7 @@ public struct Approval: Codable, Equatable {
     /// The item's title and vault name as the dialog showed them. Display only, so unsigned.
     public let itemLabel: String?
     public let vaultLabel: String?
-    /// Signature over `signedPayload`, made with the Touch ID-gated approval key.
+    /// Signature over `signedPayload`, made with the approval key.
     public let signature: Data?
     /// For approvals given on a paired phone, which can't use the Mac's approval key: the
     /// phone's signed statement, whose challenge commits to `signedPayload`.
