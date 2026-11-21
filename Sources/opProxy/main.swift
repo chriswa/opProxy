@@ -89,6 +89,13 @@ case "daemon":
     let authContext = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? AuthContextPanel(log: log) : nil
     auth.promptObserver = authContext
     do { try daemon.start() } catch { fail("could not start: \(error)") }
+    // 1Password's own prompts, for op calls opProxy doesn't answer, get framed with who asked.
+    let nativePrompts = authContext.map { context in
+        NativePromptWatcher(log: log, passthroughs: daemon.passthroughs,
+                            shimDir: paths.stateDir.appendingPathComponent("bin").path,
+                            ownPromptShowing: { context.isFraming })
+    }
+    nativePrompts?.start()
     feed.authStatus = { (auth.current, auth.isRefreshing) }
     // iPhones are reached through opProxy iCloud Relay, the separately signed helper that
     // holds CloudKit; it only runs while there's a phone to serve.
@@ -122,7 +129,7 @@ case "daemon":
     let app = NSApplication.shared
     app.setActivationPolicy(.accessory)
     let menuBar = TestKnobs.value("OPPROXY_NO_MENU_BAR") == nil ? MenuBarController(daemon: daemon, pairing: pairing, paths: paths) : nil
-    withExtendedLifetime((menuBar, authContext, systemEvents)) { app.run() }
+    withExtendedLifetime((menuBar, authContext, nativePrompts, systemEvents)) { app.run() }
 
 case "disable", "enable":
     do {

@@ -193,6 +193,10 @@ check "pairing key: never changed" grep -q "opProxy's own pairing key" <<<"$err"
 out=$(agent "$OP" item create --template t.json 'password=hunter3')
 check "unsupported write: passes through" not_daemon "$out"
 check "passthrough argv never logged" [ "$(count hunter3)" = 0 ]
+check "passthrough: logged with who and why" grep -q "passed through: claude:sess-A op item create (uses --template)" "$LOG"
+out=$(agent "$OP" run -- printenv)
+check "op run: passes through" not_daemon "$out"
+check "op run: logged" grep -q "passed through: claude:sess-A op run (\`op run\` is not a command opProxy handles)" "$LOG"
 start_daemon denied
 err=$(agent "$OP" item edit edit-me 'password=again' 2>&1); rc=$?
 check "denied write: refused" [ $rc = 1 ]

@@ -78,6 +78,8 @@ The real `op` runs unchanged, so 1Password prompts exactly as it always has, for
 - the daemon being stopped
 - opProxy being switched off (menu bar **Installed**, or `opProxy disable`)
 
+**1Password's own prompts are framed too.** Before the shim hands a call to the real `op`, it tells the daemon, which logs who asked, `op <subcommand>` and why (`passed through: claude:4c406d55 op run (…)`), never the arguments. Calls can also skip opProxy's `op` altogether: a PATH that puts Homebrew's directory before `~/.opProxy/bin`, or `/opt/homebrew/bin/op` by its full path. Either way, while 1Password shows a prompt and a real `op` is running, opProxy puts a violet backdrop around the prompt: the agent (or terminal) and its session, the `op` command (assigned values hidden), why it went to 1Password and not opProxy, the agent's shell command and the working directory. 1Password's prompt itself names whichever app owns the terminal session (Spaceterm's `pty-daemon`, say), not the agent. Each one is logged as `1Password prompt for …`, with `1Password prompt closed after …s` when it goes. A call that skips opProxy and doesn't prompt (1Password authorized that terminal session in the last 10 minutes) isn't seen at all.
+
 ### Who is asking
 
 The daemon walks the caller's process ancestry, looking for the nearest **genuinely signed agent binary**:

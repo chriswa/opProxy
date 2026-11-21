@@ -416,12 +416,35 @@ final class Daemon {
         case .showSetup:
             if let onShowSetup { DispatchQueue.main.async(execute: onShowSetup) }
             reply = try? JSONEncoder().encode(status())
+        case .passedThrough(let notice):
+            if let peer { notePassthrough(notice, peer: peer) }
+            reply = Data("{}".utf8)
         case .pairPhone:
             let error = onPairPhone == nil ? "This opProxy build can't use iCloud: run scripts/provision-mac.sh, then install.sh." : nil
             if let onPairPhone { DispatchQueue.main.async(execute: onPairPhone) }
             reply = try? JSONEncoder().encode(status(error: error))
         }
         if let reply { _ = UnixSocket.writeAll(fd, reply) }
+    }
+
+    /// The calls the shim handed to the real op, for the log and for framing the 1Password
+    /// prompts they raise (`NativePromptWatcher`).
+    let passthroughs = PassthroughRecord()
+
+    /// Logs a call opProxy won't answer: who, `op <subcommand>` and why, never its arguments,
+    /// which can be secrets.
+    private func notePassthrough(_ notice: PassthroughNotice, peer: pid_t) {
+        let request = notice.request
+        let command = NativeOp.subcommand(request.argv)
+        let reason: String
+        if case .passthrough(let fromArgv) = OpCommand(argv: request.argv).routing {
+            reason = fromArgv
+        } else {
+            reason = NativeOp.oneLine(notice.reason, limit: 120)
+        }
+        let who = identify(request, peer: peer)?.logName ?? "unknown caller"
+        log.write("passed through: \(who) \(command) (\(reason)) in \(NativeOp.oneLine(NativeOp.abbreviated(request.cwd)))")
+        passthroughs.record(pid: peer, caller: who, command: command, reason: reason)
     }
 
     /// Who is asking, as far as the process tree shows.
@@ -466,7 +489,10 @@ final class Daemon {
             log.write("rejected: \(path)")
             return .failure("opProxy doesn't answer `\(path)`; it must run directly.")
         }
-        guard let caller = identify(request, peer: peer) else { return .usePassthrough }
+        guard let caller = identify(request, peer: peer) else {
+            log.write("passed through (no terminal session): \(path)")
+            return .usePassthrough
+        }
         let command = "op " + (plan.write?.redactedArgv ?? request.argv).joined(separator: " ")
         var tag = "\(caller.logName) \(command)"
         let op: OpEmulator
@@ -477,6 +503,7 @@ final class Daemon {
                 ?? request.env["OP_ACCOUNT"].flatMap { $0.isEmpty ? nil : $0 }
             if let named, !account.matches(named) {
                 log.write("passed through (account \(named)): \(caller.logName) \(path)")
+                passthroughs.record(pid: peer, caller: caller.logName, command: path, reason: "names another account")
                 return .usePassthrough
             }
             op = OpEmulator(client: client, account: account)
@@ -768,6 +795,33 @@ final class Daemon {
     /// Forgets the cached listings, after a write changed what's there.
     private func listingsChanged() {
         catalogLock.withLock { catalogs.removeAll() }
+    }
+}
+
+/// Recent calls the shim passed through, by the process that is about to become the real op.
+final class PassthroughRecord {
+    struct Entry {
+        let caller: String
+        let command: String
+        let reason: String
+        let startTime: Double
+        let at: Date
+    }
+
+    private let lock = NSLock()
+    private var entries: [pid_t: Entry] = [:]
+
+    func record(pid: pid_t, caller: String, command: String, reason: String) {
+        // exec keeps the PID and start time, so the op this becomes matches on both.
+        let start = ProcessTree.entry(pid)?.startTime ?? 0
+        lock.withLock {
+            entries = entries.filter { Date().timeIntervalSince($0.value.at) < 30 * 60 }
+            entries[pid] = Entry(caller: caller, command: command, reason: reason, startTime: start, at: Date())
+        }
+    }
+
+    func entry(pid: pid_t, startTime: Double) -> Entry? {
+        lock.withLock { entries[pid].flatMap { $0.startTime == startTime ? $0 : nil } }
     }
 }
 

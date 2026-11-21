@@ -9,18 +9,25 @@ enum Shim {
         let env = ProcessInfo.processInfo.environment
         let paths = Paths(environment: env)
 
-        // Every read and item write goes to the daemon, from agents and terminals alike, so its
-        // dialog is always the one that appears. It decides from the process tree who is asking.
-        guard !paths.isDisabled, !ProxyRequest.bypassesDesktopApp(env),
-              case .proxy = OpCommand(argv: args).routing,
-              let fd = UnixSocket.connect(path: paths.socket.path)
-        else { passthrough(paths.realOp, args) }
+        if paths.isDisabled { passthrough(paths.realOp, args) }
         let plan = OpCommand(argv: args).routing
-
         let request = ProxyRequest(
             session: AgentSession.detect(environment: env, ancestry: { ProcessTree.ancestry(of: getpid()) }),
             labelEnvironment: OpProxyConfig.load(paths)?.labelEnvironment(env), argv: args, env: ProxyRequest.forwardedEnvironment(env),
             cwd: FileManager.default.currentDirectoryPath)
+
+        // Every read and item write goes to the daemon, from agents and terminals alike, so its
+        // dialog is always the one that appears. It decides from the process tree who is asking.
+        // Anything else still tells the daemon before it goes to the real op.
+        if ProxyRequest.bypassesDesktopApp(env) {
+            notePassthrough(paths, request, reason: "uses a service account, Connect or OP_SESSION_ credential")
+            passthrough(paths.realOp, args)
+        }
+        if case .passthrough(let reason) = plan {
+            notePassthrough(paths, request, reason: reason)
+            passthrough(paths.realOp, args)
+        }
+        guard let fd = UnixSocket.connect(path: paths.socket.path) else { passthrough(paths.realOp, args) }
 
         guard let body = try? JSONEncoder().encode(DaemonMessage.proxy(request)),
               UnixSocket.writeAll(fd, body + Data("\n".utf8)) else {
@@ -40,6 +47,19 @@ enum Shim {
         }
         _ = UnixSocket.writeAll(STDOUT_FILENO, response.stdout)
         exit(response.exitCode)
+    }
+
+    /// Tells the daemon about a call opProxy won't answer, and waits briefly for it to note who
+    /// is asking (which needs this process alive). Without a daemon, nothing is recorded.
+    static func notePassthrough(_ paths: Paths, _ request: ProxyRequest, reason: String) {
+        guard let fd = UnixSocket.connect(path: paths.socket.path) else { return }
+        defer { close(fd) }
+        var timeout = timeval(tv_sec: 0, tv_usec: 500_000)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        guard let body = try? JSONEncoder().encode(DaemonMessage.passedThrough(PassthroughNotice(request: request, reason: reason))),
+              UnixSocket.writeAll(fd, body + Data("\n".utf8)) else { return }
+        var ack: UInt8 = 0
+        _ = read(fd, &ack, 1)
     }
 
     static func passthrough(_ realOp: String, _ args: [String]) -> Never {

@@ -72,6 +72,21 @@ public enum DaemonMessage: Codable {
     case pairPhone
     /// Opens the Setup window; replies with `DaemonStatus`.
     case showSetup
+    /// Sent by the shim just before it execs the real `op`, so the log records the call and a
+    /// 1Password prompt it raises can be framed with who asked. Replies `{}` once recorded.
+    case passedThrough(PassthroughNotice)
+}
+
+public struct PassthroughNotice: Codable {
+    public let request: ProxyRequest
+    /// The shim's reason. The daemon prefers its own, from argv; this one only covers what it
+    /// can't see (credentials in the caller's environment).
+    public let reason: String
+
+    public init(request: ProxyRequest, reason: String) {
+        self.request = request
+        self.reason = reason
+    }
 }
 
 public struct DaemonStatus: Codable {

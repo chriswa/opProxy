@@ -28,6 +28,9 @@ final class AuthContextPanel: AuthPromptObserver {
         } }
     }
 
+    /// True from just before opProxy's own authorization may prompt until it's done.
+    var isFraming: Bool { panel != nil }
+
     private var reason: AuthReason = .startup
     private var prompt: PromptWindow?
 
