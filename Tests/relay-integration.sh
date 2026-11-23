@@ -51,7 +51,7 @@ wait_for() { for _ in $(seq 100); do eval "$1" && return 0; sleep 0.1; done; ret
 DAEMON=
 start_daemon() { # extra env assignments...
   env OPPROXY_NO_MENU_BAR=1 OPPROXY_OP_REQUIREMENT=none OPPROXY_TEST_APPROVER=denied OPPROXY_TEST_DELAY=100 \
-      OPPROXY_TEST_AUTO_PAIR=1 OPPROXY_POLL_SECONDS=1 "$@" "$BIN" daemon & DAEMON=$!
+      OPPROXY_TEST_AUTO_PAIR=1 OPPROXY_POLL_SECONDS=1 OPPROXY_PHONE_DELAY=0 "$@" "$BIN" daemon & DAEMON=$!
   wait_for '[ -S "$OPPROXY_HOME/daemon.sock" ]' || { echo "daemon did not start"; exit 1; }
 }
 stop_daemon() { [ -n "$DAEMON" ] && kill "$DAEMON" 2>/dev/null && wait "$DAEMON" 2>/dev/null; DAEMON=; rm -f "$OPPROXY_HOME/daemon.sock"; }

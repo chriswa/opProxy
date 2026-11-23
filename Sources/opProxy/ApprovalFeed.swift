@@ -81,6 +81,9 @@ final class ApprovalFeed {
         let grants: [String: (approvedAt: Date, expiresAt: Date)]
         let decide: Decide
         var abandoned = false
+        /// Sent to phones yet: an item waits `publish`'s delay first, and one decided on the
+        /// Mac before then is never sent.
+        var published = false
         var revision = 0
         /// The current revision's document, as the exact string sent.
         var document = ""
@@ -131,7 +134,7 @@ final class ApprovalFeed {
         announceKeysIfChanged()
         announceStatusIfChanged()
         return FeedState(pairedKeys: announcedKeys, mac: announcedMac, status: status?.json,
-                         items: items.values.sorted { $0.createdAt < $1.createdAt }.map { ($0.id, json($0)) })
+                         items: items.values.filter(\.published).sorted { $0.createdAt < $1.createdAt }.map { ($0.id, json($0)) })
     }
 
     /// A message from a consumer. `respond` gets the `reply-result` or `pair-result` to send
@@ -155,8 +158,9 @@ final class ApprovalFeed {
 
     // MARK: Requests
 
-    /// Publishes `prompt`; returns its item ID. `decide` is called on the feed's queue.
-    func publish(_ prompt: ApprovalPrompt, decide: @escaping Decide) -> String {
+    /// Publishes `prompt` once `delay` has passed, unless it's removed first; returns its item
+    /// ID. `decide` is called on the feed's queue.
+    func publish(_ prompt: ApprovalPrompt, after delay: TimeInterval, decide: @escaping Decide) -> String {
         let id = Self.random(16)
         queue.async { [self] in
             let (options, defaultIndex) = ApprovalOptions.for(prompt.requester, write: prompt.isWrite)
@@ -178,7 +182,12 @@ final class ApprovalFeed {
                             createdAt: Date(), challenge: challenge.encoded, grants: grants, decide: decide)
             revise(&item)
             items[id] = item
-            broadcast(.upsert(id: item.id, item: json(item)))
+            queue.asyncAfter(deadline: .now() + delay) { [self] in
+                guard var item = items[id] else { return }
+                item.published = true
+                items[id] = item
+                broadcast(.upsert(id: item.id, item: json(item)))
+            }
         }
         return id
     }
@@ -189,7 +198,7 @@ final class ApprovalFeed {
             guard var item = items.values.first(where: { $0.key == key }) else { return }
             item.expiresAt = deadline
             items[item.id] = item
-            broadcast(.upsert(id: item.id, item: json(item)))
+            if item.published { broadcast(.upsert(id: item.id, item: json(item))) }
         }
     }
 
@@ -199,7 +208,7 @@ final class ApprovalFeed {
             item.abandoned = true
             revise(&item)
             items[item.id] = item
-            broadcast(.upsert(id: item.id, item: json(item)))
+            if item.published { broadcast(.upsert(id: item.id, item: json(item))) }
         }
     }
 
@@ -209,7 +218,8 @@ final class ApprovalFeed {
     }
 
     private func finish(_ id: String, note: String) {
-        guard items.removeValue(forKey: id) != nil else { return }
+        guard let item = items.removeValue(forKey: id) else { return }
+        guard item.published else { return }
         finished[id] = note
         broadcast(.remove(id: id, note: note))
     }
@@ -240,7 +250,7 @@ final class ApprovalFeed {
         guard abs(Date().timeIntervalSince1970 * 1000 - statement.signedAt) < Self.replyLifetime * 1000 else {
             return "That reply is too old: answer again."
         }
-        guard let item = items[id] else {
+        guard let item = items[id], item.published else {
             switch finished[id] {
             case nil: return "That request is no longer pending."
             case "Timed out": return "That request timed out."

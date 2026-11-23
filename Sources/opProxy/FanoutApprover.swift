@@ -10,15 +10,21 @@ protocol LocalApprover: Approver {
     func dismiss(_ key: DialogKey)
 }
 
-/// Asks on the Mac and on the approval feed at once. Whichever answers first decides; the
-/// other side is then dismissed, and anything it says later is ignored.
+/// Asks on the Mac, and on the approval feed too if the Mac hasn't answered within
+/// `phoneDelay`. Whichever answers first decides; the other side is then dismissed, and
+/// anything it says later is ignored.
 final class FanoutApprover: Approver {
+    /// How long the Mac alone is asked before phones are too.
+    static let defaultPhoneDelay: TimeInterval = 30
+
     private let local: LocalApprover
     private let feed: ApprovalFeed
+    private let phoneDelay: TimeInterval
 
-    init(local: LocalApprover, feed: ApprovalFeed) {
+    init(local: LocalApprover, feed: ApprovalFeed, phoneDelay: TimeInterval = defaultPhoneDelay) {
         self.local = local
         self.feed = feed
+        self.phoneDelay = phoneDelay
         local.onCountdown = { [feed] key, deadline in feed.countdown(key, until: deadline) }
     }
 
@@ -30,7 +36,7 @@ final class FanoutApprover: Approver {
             defer { decided = true }
             return !decided
         } }
-        let id = feed.publish(prompt) { [local] decision in
+        let id = feed.publish(prompt, after: phoneDelay) { [local] decision in
             guard claim() else { return false }
             local.dismiss(prompt.key)
             completion(decision)

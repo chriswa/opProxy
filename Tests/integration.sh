@@ -82,7 +82,7 @@ count() { grep -c -- "$1" "$LOG" 2>/dev/null || true; }
 DAEMON_PID=
 start_daemon() { # decision [delay]
   stop_daemon
-  OPPROXY_NO_AUTO_AUTH=${OPPROXY_NO_AUTO_AUTH-1} OPPROXY_NO_MENU_BAR=1 OPPROXY_POLL_SECONDS=1 OPPROXY_TERMINAL_IDLE=${OPPROXY_TERMINAL_IDLE:-600} OPPROXY_TEST_APPROVER=$1 OPPROXY_TEST_DELAY=${2:-0} \
+  OPPROXY_NO_AUTO_AUTH=${OPPROXY_NO_AUTO_AUTH-1} OPPROXY_NO_MENU_BAR=1 OPPROXY_POLL_SECONDS=1 OPPROXY_PHONE_DELAY=${OPPROXY_PHONE_DELAY:-0} OPPROXY_TERMINAL_IDLE=${OPPROXY_TERMINAL_IDLE:-600} OPPROXY_TEST_APPROVER=$1 OPPROXY_TEST_DELAY=${2:-0} \
     OPPROXY_OP_REQUIREMENT=${OP_REQUIREMENT-none} OPPROXY_TEST_SWAP_OP=${OPPROXY_TEST_SWAP_OP:-} OPPROXY_TEST_AUTO_PAIR=1 \
     "$DAEMON_BIN" daemon & DAEMON_PID=$!
   for _ in $(seq 50); do [ -S "$OPPROXY_HOME/daemon.sock" ] && return; sleep 0.1; done
@@ -360,6 +360,28 @@ res=$(phone approve once --stale)
 check "old reply: refused" grep -q "That reply is too old" <<<"$res"
 res=$(phone deny); wait $apid
 check "refused replies: request still answerable" grep -q "user denied" "$WORK/asked"
+
+# --- phones hear of a request only once the Mac has left it unanswered for a while (2-3s here)
+OPPROXY_PHONE_DELAY=2 start_daemon denied 30
+started=$(date +%s)
+ask sess-U deny
+elapsed=$(( $(date +%s) - started ))
+check "phone delay: the phone hears after the delay" [ "$elapsed" -ge 2 ]
+check "phone delay: the phone's answer still decides" [ "$elapsed" -lt 20 ] && [ "$asked_rc" = 1 ]
+OPPROXY_PHONE_DELAY=3 start_daemon denied 1
+python3 -c "
+import json, socket, sys, time
+s = socket.socket(socket.AF_UNIX); s.settimeout(0.5); s.connect(sys.argv[1])
+data = b''; end = time.time() + 5
+while time.time() < end:
+    try: data += s.recv(65536)
+    except (TimeoutError, socket.timeout): pass
+msgs = [json.loads(l) for l in data.splitlines() if l.strip()]
+print(sum(m['type'] == 'upsert' or (m['type'] == 'snapshot' and bool(m.get('items'))) for m in msgs))" "$FEED" > "$WORK/seen" & lpid=$!
+sleep 0.3
+SID=sess-V agent "$OP" read op://phone/item/field >/dev/null 2>&1
+wait $lpid
+check "phone delay: answered on the Mac first, never reaches the phone" [ "$(cat "$WORK/seen")" = 0 ]
 start_daemon approved 1
 
 # --- approvals persist across daemon restarts

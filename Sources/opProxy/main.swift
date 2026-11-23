@@ -68,10 +68,12 @@ case "daemon":
     }
     let signer = makeApprovalSigner(paths: paths, log: log)
     let devices = makePairedDeviceStore(paths: paths, signer: signer)
-    // Every request is also published for paired phones; the first answer wins.
+    // A request the Mac hasn't answered within 30 seconds is also published for paired
+    // phones; the first answer wins.
     let feed = ApprovalFeed(log: log, devices: devices, identity: { MacIdentity.current(paths) }, confirmPairing:
         Pairing.confirmer(devices: devices, signer: signer, autoPair: TestKnobs.value("OPPROXY_TEST_AUTO_PAIR") != nil))
-    let approver = FanoutApprover(local: local, feed: feed)
+    let approver = FanoutApprover(local: local, feed: feed,
+                                  phoneDelay: Double(TestKnobs.value("OPPROXY_PHONE_DELAY") ?? "") ?? FanoutApprover.defaultPhoneDelay)
     guard let executable = Bundle.main.executablePath else { fail("cannot find my own executable") }
     // Tests stand in for 1Password with a fixture, served by this same binary.
     let helper = TestKnobs.value("OPPROXY_TEST_SDK").map { HelperSpec(executable: executable, arguments: ["fake-sdk-helper", $0], requirement: nil) }

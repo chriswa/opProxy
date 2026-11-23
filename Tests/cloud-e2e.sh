@@ -47,7 +47,7 @@ check() { local name=$1; shift; if "$@"; then PASS=$((PASS+1)); echo "ok   $name
 LOG="$OPPROXY_HOME/daemon.log"
 QR="$WORK/qr"
 # The Mac's dialog never answers on its own here: only the phone can decide in time.
-OPPROXY_NO_AUTO_AUTH=1 OPPROXY_NO_MENU_BAR=1 OPPROXY_OP_REQUIREMENT=none OPPROXY_TEST_APPROVER=denied OPPROXY_TEST_DELAY=100 \
+OPPROXY_NO_AUTO_AUTH=1 OPPROXY_NO_MENU_BAR=1 OPPROXY_OP_REQUIREMENT=none OPPROXY_PHONE_DELAY=0 OPPROXY_TEST_APPROVER=denied OPPROXY_TEST_DELAY=100 \
     OPPROXY_TEST_AUTO_PAIR=1 OPPROXY_TEST_CLOUD_PAIR="$QR" "$BIN" daemon & DAEMON=$!
 trap 'kill $DAEMON 2>/dev/null; PHONE reset >/dev/null 2>&1; rm -rf "$WORK"' EXIT
 for _ in $(seq 100); do [ -s "$QR" ] && break; sleep 0.1; done

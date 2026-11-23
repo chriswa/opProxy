@@ -48,7 +48,7 @@ echo "(stub op) $*"
 STUB
     chmod +x "$OPPROXY_REAL_OP"
     export OPPROXY_TEST_SDK="$OPPROXY_HOME/sdk/fixture.json"
-    OPPROXY_NO_AUTO_AUTH=1 OPPROXY_OP_REQUIREMENT=none nohup "$BIN" daemon >>"$OPPROXY_HOME/launch.log" 2>&1 &
+    OPPROXY_NO_AUTO_AUTH=1 OPPROXY_OP_REQUIREMENT=none OPPROXY_PHONE_DELAY=0 nohup "$BIN" daemon >>"$OPPROXY_HOME/launch.log" 2>&1 &
     echo $! > "$PIDFILE"
     echo "test daemon running (log: $OPPROXY_HOME/daemon.log). Pair from its menu bar icon: Pair an iPhone…"
     DEVICE=$(xcrun devicectl list devices 2>/dev/null | awk '/iPhone/ && $0 !~ /unavailable/ {print $3; exit}')
