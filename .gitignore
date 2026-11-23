@@ -9,3 +9,5 @@ phone/OpProxyPhone.xcodeproj/
 phone/build/
 # A mirror of the history before it was rewritten to remove work fixtures (kept locally only).
 .history-backup.git/
+# macOS Finder metadata.
+.DS_Store
