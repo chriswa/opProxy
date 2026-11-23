@@ -4,8 +4,11 @@ import XCTest
 @testable import OpProxyCore
 
 final class KernelSignatureTests: XCTestCase {
-    /// Signed with a SHA-1 primary directory and a SHA-256 alternate; the kernel runs the
-    /// alternate, which only the CMS's hash-agility attributes vouch for.
+    /// Signed by Apple with a SHA-1 primary directory and a SHA-256 alternate; the kernel runs
+    /// the alternate, which only the CMS's hash-agility attributes vouch for. Through macOS 26
+    /// its leaf was "Software Signing", OU "Apple Software"; macOS 27's "macOS Software
+    /// Signing" leaf has no OU, so it satisfies no `SigningRequirement` and the positive
+    /// end-to-end checks use `DeveloperSigned` instead.
     static let multiHashBinary = "/usr/sbin/kextstat"
     static let multiHashRequirement = SigningRequirement(identifier: "com.apple.kextstat", team: "Apple Software")
 
@@ -17,9 +20,9 @@ final class KernelSignatureTests: XCTestCase {
         XCTAssertEqual(signature.directories.map(\.slot), [0, 0x1000])
         XCTAssertEqual(signature.directories.map(\.hashType), [.sha1, .sha256])
         XCTAssertEqual(signature.directories[1].cdhash, loaded.cdhash, "the kernel runs the SHA-256 alternate")
-        XCTAssertTrue(KernelSignature.verify(blob: loaded.blob, kernelCDHash: loaded.cdhash,
-                                             requirement: Self.multiHashRequirement))
-        XCTAssertTrue(KernelSignature.process(loaded.pid, satisfies: Self.multiHashRequirement))
+        let signer = try XCTUnwrap(CMSSigner(cms: XCTUnwrap(signature.cms), content: XCTUnwrap(signature.primary).bytes))
+        XCTAssertEqual(KernelSignature.authenticated(signature.directories, kernelCDHash: loaded.cdhash, agility: signer.agility),
+                       signature.directories[1])
     }
 
     func testAgilityAttributesListEveryDirectory() throws {
@@ -30,7 +33,50 @@ final class KernelSignatureTests: XCTestCase {
         XCTAssertEqual(signer.agility.digests[4], signature.directories[0].digest)
         XCTAssertEqual(signer.agility.digests[192], signature.directories[1].digest)
         XCTAssertTrue(signer.isAnchoredAtAppleRoot)
-        XCTAssertEqual(signer.leafOU, "Apple Software")
+    }
+
+    func testLeafWithoutOUSatisfiesNoTeam() throws {
+        let loaded = try Loaded(Self.multiHashBinary)
+        let signature = try XCTUnwrap(SignatureBlob(loaded.blob))
+        let signer = try XCTUnwrap(CMSSigner(cms: XCTUnwrap(signature.cms), content: XCTUnwrap(signature.primary).bytes))
+        guard signer.leafOU == nil else { throw XCTSkip("this macOS signs its binaries with an OU (\(signer.leafOU!))") }
+        for team in ["Apple Software", ""] {
+            XCTAssertFalse(KernelSignature.verify(blob: loaded.blob, kernelCDHash: loaded.cdhash,
+                                                  requirement: SigningRequirement(identifier: "com.apple.kextstat", team: team)))
+        }
+    }
+
+    func testDeveloperSignedMultiHashVerifies() throws {
+        // A real CMS with hash agility, an OU'd leaf and the kernel running the alternate: the
+        // path a SHA-1+SHA-256 vendor signature takes.
+        let signed = try DeveloperSigned()
+        let loaded = try Loaded(signed.path)
+        let signature = try XCTUnwrap(SignatureBlob(loaded.blob))
+        XCTAssertEqual(signature.directories.map(\.hashType), [.sha1, .sha256])
+        XCTAssertEqual(signature.directories[1].cdhash, loaded.cdhash, "the kernel runs the SHA-256 alternate")
+        let signer = try XCTUnwrap(CMSSigner(cms: XCTUnwrap(signature.cms), content: XCTUnwrap(signature.primary).bytes))
+        XCTAssertEqual(signer.leafOU, signed.requirement.team)
+        XCTAssertTrue(signer.isAnchoredAtAppleRoot)
+        XCTAssertTrue(KernelSignature.verify(blob: loaded.blob, kernelCDHash: loaded.cdhash, requirement: signed.requirement))
+        XCTAssertTrue(KernelSignature.process(loaded.pid, satisfies: signed.requirement))
+        for requirement in [SigningRequirement(identifier: signed.requirement.identifier, team: "Q6L2SF6YDW"),
+                            SigningRequirement(identifier: "com.anthropic.claude-code", team: signed.requirement.team)] {
+            XCTAssertFalse(KernelSignature.process(loaded.pid, satisfies: requirement), requirement.text)
+        }
+        // An edited alternate under the same, still-valid CMS.
+        let tampered = try flipLastByte(of: 0x1000, in: loaded.blob)
+        let edited = try XCTUnwrap(SignatureBlob(tampered)?.directories.first { $0.slot == 0x1000 }?.cdhash)
+        XCTAssertFalse(KernelSignature.verify(blob: tampered, kernelCDHash: edited, requirement: signed.requirement))
+    }
+
+    func testOnePasswordCLIVerifiesFromKernelSignature() throws {
+        guard let op = ["/opt/homebrew/bin/op", "/usr/local/bin/op"].first(where: FileManager.default.isExecutableFile)
+        else { throw XCTSkip("1Password CLI not installed") }
+        let loaded = try Loaded(URL(fileURLWithPath: op).resolvingSymlinksInPath().path)
+        let requirement = SigningRequirement(identifier: "com.1password.op", team: "2BUA8C4S2C")
+        XCTAssertEqual(requirement.text, CodeSignature.onePasswordCLI)
+        XCTAssertTrue(KernelSignature.process(loaded.pid, satisfies: requirement))
+        XCTAssertFalse(KernelSignature.process(loaded.pid, satisfies: SigningRequirement(identifier: "com.1password.op", team: "7H2524M5TN")))
     }
 
     func testRequirementMustMatch() throws {
@@ -208,7 +254,53 @@ final class KernelSignatureTests: XCTestCase {
         static var spawned: [pid_t] = []
     }
 
+    /// A copy of `multiHashBinary` signed SHA-1+SHA-256 with this Mac's first Apple
+    /// Development or Developer ID identity; skips if there is none.
+    struct DeveloperSigned {
+        let path: String
+        let requirement: SigningRequirement
+        static let identifier = "com.chriswa.opproxy.kernelsig-test"
+
+        init() throws {
+            let identities = try Self.run("/usr/bin/security", ["find-identity", "-v", "-p", "codesigning"])
+            guard let line = identities.split(separator: "\n").first(where: {
+                $0.contains("\"Apple Development:") || $0.contains("\"Developer ID Application:")
+            }), let hash = line.split(separator: " ").dropFirst().first
+            else { throw XCTSkip("no Apple Development or Developer ID signing identity") }
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kernelsig-\(UUID())")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            path = dir.appendingPathComponent("signed").path
+            try FileManager.default.copyItem(atPath: KernelSignatureTests.multiHashBinary, toPath: path)
+            _ = try Self.run("/usr/bin/codesign", ["-s", String(hash), "-f", "--digest-algorithm=sha1,sha256",
+                                                   "-i", Self.identifier, path])
+            let info = try Self.run("/usr/bin/codesign", ["-dv", path])
+            guard let team = info.split(separator: "\n").first(where: { $0.hasPrefix("TeamIdentifier=") })?
+                .dropFirst("TeamIdentifier=".count), team != "not set"
+            else { throw XCTSkip("signed copy has no team") }
+            requirement = SigningRequirement(identifier: Self.identifier, team: String(team))
+            KernelSignatureTests.cleanup.append(dir)
+        }
+
+        /// stdout and stderr together; skips if the tool fails (a locked keychain, say).
+        static func run(_ tool: String, _ args: [String]) throws -> String {
+            let process = Process(), pipe = Pipe()
+            process.executableURL = URL(fileURLWithPath: tool)
+            process.arguments = args
+            process.standardOutput = pipe
+            process.standardError = pipe
+            try process.run()
+            let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { throw XCTSkip("\(tool) failed: \(output)") }
+            return output
+        }
+    }
+
+    static var cleanup: [URL] = []
+
     override func tearDown() {
+        for dir in Self.cleanup { try? FileManager.default.removeItem(at: dir) }
+        Self.cleanup = []
         for pid in Loaded.spawned {
             kill(pid, SIGKILL)
             var status: Int32 = 0
