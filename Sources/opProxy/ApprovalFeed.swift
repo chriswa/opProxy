@@ -61,6 +61,9 @@ final class ApprovalFeed {
     /// Notes for items no longer pending, so a late reply hears why.
     private var finished: [String: String] = [:]
     private var pairing = false
+    /// A request waited out its delay unanswered and went to phones, so the user may be away
+    /// from the Mac: later requests go to phones at once, until one is answered on the Mac.
+    private var away = false
     private var announcedKeys: [String] = []
     private var keyWatch: DispatchSourceTimer?
     /// The 1Password authorization and whether its prompt may be up; set before `start()`.
@@ -158,8 +161,9 @@ final class ApprovalFeed {
 
     // MARK: Requests
 
-    /// Publishes `prompt` once `delay` has passed, unless it's removed first; returns its item
-    /// ID. `decide` is called on the feed's queue.
+    /// Publishes `prompt` once `delay` has passed, unless it's removed first, or at once while
+    /// the user seems away from the Mac (`away`); returns its item ID. `decide` is called on
+    /// the feed's queue.
     func publish(_ prompt: ApprovalPrompt, after delay: TimeInterval, decide: @escaping Decide) -> String {
         let id = Self.random(16)
         queue.async { [self] in
@@ -182,14 +186,32 @@ final class ApprovalFeed {
                             createdAt: Date(), challenge: challenge.encoded, grants: grants, decide: decide)
             revise(&item)
             items[id] = item
-            queue.asyncAfter(deadline: .now() + delay) { [self] in
-                guard var item = items[id] else { return }
-                item.published = true
-                items[id] = item
-                broadcast(.upsert(id: item.id, item: json(item)))
-            }
+            if away { send(id) } else { queue.asyncAfter(deadline: .now() + delay) { [self] in send(id) } }
         }
         return id
+    }
+
+    /// Sends a waiting item to phones. The first to go marks the user away, which sends any
+    /// others still waiting too.
+    private func send(_ id: String) {
+        guard var item = items[id], !item.published else { return }
+        item.published = true
+        items[id] = item
+        broadcast(.upsert(id: item.id, item: json(item)))
+        guard !away else { return }
+        away = true
+        log.write("unanswered on the Mac: sending requests to phones at once until one is answered there")
+        for waiting in items.values.filter({ !$0.published }).sorted(by: { $0.createdAt < $1.createdAt }) { send(waiting.id) }
+    }
+
+    /// The user allowed or denied a request on the Mac: they're back, so requests wait their
+    /// delay again.
+    func answeredOnMac() {
+        queue.async { [self] in
+            guard away else { return }
+            away = false
+            log.write("answered on the Mac: requests wait for the Mac first again")
+        }
     }
 
     /// `key`'s dialog is on screen and times out at `deadline`.

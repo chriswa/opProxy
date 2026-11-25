@@ -382,6 +382,20 @@ sleep 0.3
 SID=sess-V agent "$OP" read op://phone/item/field >/dev/null 2>&1
 wait $lpid
 check "phone delay: answered on the Mac first, never reaches the phone" [ "$(cat "$WORK/seen")" = 0 ]
+# Once one request waits out the delay, the next go to the phone at once, until the Mac answers one.
+now() { python3 -c 'import time; print(time.time())'; }
+since() { python3 -c 'import sys, time; print(time.time() - float(sys.argv[1]))' "$1"; }
+quick() { python3 -c 'import sys; sys.exit(not float(sys.argv[1]) < float(sys.argv[2]))' "$1" "$2"; }
+OPPROXY_PHONE_DELAY=1.5 start_daemon denied 4
+t=$(now); ask sess-W deny; first=$(since "$t")
+t=$(now); ask sess-X deny; second=$(since "$t")
+check "phone away: the first request waits for the Mac" quick 1.5 "$first"
+check "phone away: the next goes to the phone at once" quick "$second" 1
+check "phone away: logged" grep -q "sending requests to phones at once" "$LOG"
+SID=sess-Y agent "$OP" read op://phone/item/field >/dev/null 2>&1   # left to the Mac, which denies it
+check "phone away: a Mac answer ends it" grep -q "requests wait for the Mac first again" "$LOG"
+t=$(now); ask sess-Z deny; third=$(since "$t")
+check "phone away: then requests wait for the Mac again" quick 1.5 "$third"
 start_daemon approved 1
 
 # --- approvals persist across daemon restarts

@@ -11,7 +11,8 @@ protocol LocalApprover: Approver {
 }
 
 /// Asks on the Mac, and on the approval feed too if the Mac hasn't answered within
-/// `phoneDelay`. Whichever answers first decides; the other side is then dismissed, and
+/// `phoneDelay`; once one hasn't, later requests go to the feed at once, until one is answered
+/// on the Mac. Whichever answers first decides; the other side is then dismissed, and
 /// anything it says later is ignored.
 final class FanoutApprover: Approver {
     /// How long the Mac alone is asked before phones are too.
@@ -45,6 +46,7 @@ final class FanoutApprover: Approver {
         local.requestApproval(prompt) { [feed] decision in
             guard claim() else { return }
             feed.remove(id, note: Self.macNote(decision))
+            if case .timedOut = decision {} else { feed.answeredOnMac() }
             completion(decision)
         }
     }
